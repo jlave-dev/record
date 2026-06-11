@@ -9,6 +9,9 @@ Local macOS capture and transcription tooling for agent workflows.
 
 The tools are often used together, but they stay separate. There is no top-level `record` executable. Recordings, source media, transcripts, metadata, configuration, and runtime state stay on the local machine by default.
 
+> [!IMPORTANT]
+> You are responsible for making sure each recording is legal and allowed by the policies that apply where you live, work, study, or communicate. Recording consent laws vary by jurisdiction, and workplace, school, client, meeting, or platform policies may be stricter than local law. This project does not decide whether a recording is permitted.
+
 ## Requirements
 
 - macOS.
