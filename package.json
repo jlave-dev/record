@@ -1,0 +1,29 @@
+{
+  "name": "record-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local macOS capture and transcription tooling workspace.",
+  "type": "module",
+  "workspaces": [
+    "packages/capture",
+    "packages/transcribe"
+  ],
+  "scripts": {
+    "setup:capture": "npm --workspace capture run setup",
+    "setup:transcribe": "npm --workspace transcribe run setup",
+    "setup": "npm run setup:capture && npm run setup:transcribe",
+    "build:bundle": "npm --workspaces run build",
+    "build:binary:macos-arm64": "npm --workspaces run build:binary:macos-arm64",
+    "doctor": "./scripts/doctor-all.sh",
+    "install:local": "npm --workspaces run install:local",
+    "plugin:smoke": "./plugins/record/scripts/smoke-test.sh"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.11",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.5.3"
+  }
+}

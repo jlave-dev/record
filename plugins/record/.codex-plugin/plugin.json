@@ -1,0 +1,45 @@
+{
+  "name": "record",
+  "version": "0.1.0",
+  "description": "Local adapter skills for installed capture and transcribe CLIs.",
+  "author": {
+    "name": "James Lave",
+    "url": "https://github.com/jlave-dev"
+  },
+  "homepage": "https://github.com/jlave-dev/record",
+  "repository": "https://github.com/jlave-dev/record",
+  "license": "MIT",
+  "keywords": [
+    "capture",
+    "transcription",
+    "macos",
+    "obs",
+    "whisper",
+    "local-first"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Record",
+    "shortDescription": "Capture apps and transcribe local media.",
+    "longDescription": "Record exposes two local adapter skills for the installed capture and transcribe CLIs. It helps agents start and stop OBS-backed Mac app recordings and transcribe local media with whisper.cpp while keeping recordings, transcripts, metadata, and setup state on the user's machine.",
+    "developerName": "James Lave",
+    "category": "Productivity",
+    "capabilities": [
+      "app capture",
+      "recording control",
+      "local transcription",
+      "artifact triage",
+      "setup diagnostics"
+    ],
+    "websiteURL": "https://github.com/jlave-dev/record",
+    "privacyPolicyURL": "https://github.com/jlave-dev/agent-skills/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/jlave-dev/agent-skills/blob/main/TERMS.md",
+    "defaultPrompt": [
+      "Use $capture to record a visible Mac app.",
+      "Use $transcribe to transcribe a local media file."
+    ],
+    "brandColor": "#2F7D57",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg"
+  }
+}

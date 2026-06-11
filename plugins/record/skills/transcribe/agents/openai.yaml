@@ -1,0 +1,7 @@
+interface:
+  display_name: "Transcribe"
+  short_description: "Transcribe local media files."
+  default_prompt: "Use $transcribe to transcribe a local media file."
+
+policy:
+  allow_implicit_invocation: true

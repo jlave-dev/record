@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Record plugin icon">
+  <defs>
+    <linearGradient id="bg" x1="48" y1="20" x2="210" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2F7D57"/>
+      <stop offset="1" stop-color="#0B2A27"/>
+    </linearGradient>
+    <linearGradient id="pane" x1="64" y1="62" x2="190" y2="184" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#153D3B"/>
+      <stop offset="1" stop-color="#071918"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="54" fill="url(#bg)"/>
+  <rect x="43" y="49" width="170" height="158" rx="30" fill="#E6FFF4"/>
+  <rect x="58" y="66" width="140" height="124" rx="20" fill="url(#pane)"/>
+  <circle cx="174" cy="90" r="17" fill="#FF4B45"/>
+  <circle cx="174" cy="90" r="7" fill="#FFEAE8"/>
+  <rect x="78" y="122" width="14" height="36" rx="7" fill="#75F2C7"/>
+  <rect x="104" y="101" width="14" height="78" rx="7" fill="#75F2C7"/>
+  <rect x="130" y="117" width="14" height="46" rx="7" fill="#75F2C7"/>
+  <rect x="156" y="91" width="14" height="98" rx="7" fill="#75F2C7"/>
+</svg>

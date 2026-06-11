@@ -1,0 +1,7 @@
+interface:
+  display_name: "Capture"
+  short_description: "Record visible Mac apps locally."
+  default_prompt: "Use $capture to record a visible Mac app."
+
+policy:
+  allow_implicit_invocation: true
