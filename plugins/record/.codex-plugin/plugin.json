@@ -38,8 +38,8 @@
       "Use $capture to record a visible Mac app.",
       "Use $transcribe to transcribe a local media file."
     ],
-    "brandColor": "#2F7D57",
-    "composerIcon": "./assets/icon.svg",
-    "logo": "./assets/icon.svg"
+    "brandColor": "#0B5F45",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png"
   }
 }
