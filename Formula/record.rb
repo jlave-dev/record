@@ -4,9 +4,9 @@
 class Record < Formula
   desc "Native macOS app capture and local transcription CLI"
   homepage "https://github.com/jlave-dev/record"
-  url "https://github.com/jlave-dev/record/releases/download/v0.2.0/record-0.2.0-macos-arm64.tar.gz"
-  version "0.2.0"
-  sha256 "d0273933b24abf6385421f0d3aabea449e9bbffa5aab20ae3754dec37e79fc03"
+  url "https://github.com/jlave-dev/record/releases/download/v0.2.1/record-0.2.1-macos-arm64.tar.gz"
+  version "0.2.1"
+  sha256 "de131cca728ab6b085eb25301ba39a59d83e83b21cde904c57ae20120e12163e"
   license "MIT"
 
   depends_on arch: :arm64

@@ -734,7 +734,7 @@ async function main(): Promise<void> {
   program
     .name("transcribe")
     .description("Transcribe a local audio or video file with local whisper.cpp.")
-    .version("0.2.0")
+    .version("0.2.1")
     .argument("[operands...]", "unsupported legacy command or positional operand")
     .option("--input <path>", "local audio or video input file")
     .option("--output <dir>", "output directory for transcript artifacts")
