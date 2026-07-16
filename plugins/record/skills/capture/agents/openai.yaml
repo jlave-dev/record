@@ -1,6 +1,6 @@
 interface:
   display_name: "Capture"
-  short_description: "Record visible Mac apps locally."
+  short_description: "Record Mac apps locally with ScreenCaptureKit."
   default_prompt: "Use $capture to record a visible Mac app."
 
 policy:

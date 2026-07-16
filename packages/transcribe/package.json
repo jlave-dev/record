@@ -1,6 +1,6 @@
 {
   "name": "transcribe",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local whisper.cpp media transcription CLI.",
   "type": "commonjs",
   "bin": {
@@ -11,11 +11,12 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json --emitDeclarationOnly && esbuild src/index.ts --bundle --platform=node --format=cjs --target=node22 --sourcemap --outfile=dist/index.js && chmod +x dist/index.js",
-    "build:binary:macos-arm64": "../../scripts/build-binary-placeholder.sh transcribe . transcribe",
+    "build:binary:macos-arm64": "./scripts/build-binary.sh",
     "transcribe": "node dist/index.js",
     "doctor": "node dist/index.js doctor",
     "install:local": "../../scripts/install-local.sh \"$PWD\" transcribe",
-    "setup": "npm run build && node dist/index.js setup && npm run install:local && (node dist/index.js doctor || true)"
+    "setup": "npm run build && node dist/index.js setup && npm run install:local && node dist/index.js doctor",
+    "test": "npm run build && ./scripts/test-setup.sh"
   },
   "dependencies": {
     "commander": "^12.1.0"

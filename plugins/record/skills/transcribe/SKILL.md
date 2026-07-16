@@ -1,11 +1,11 @@
 ---
 name: transcribe
-description: Use when the user asks to transcribe a local audio or video file, inspect transcription setup, or triage local whisper.cpp transcription through the installed transcribe CLI.
+description: Use when the user asks to transcribe a local audio or video file, inspect transcription setup, or triage local whisper.cpp transcription through the installed record CLI.
 ---
 
 # transcribe
 
-Use the installed local `transcribe` CLI through this plugin. This skill is an adapter; it does not install, vendor, or replace the CLI.
+Use `record transcribe` through this plugin. This skill is an adapter; if `record` is missing, direct the user to the Homebrew install command reported by the helper.
 
 ## Run Commands
 

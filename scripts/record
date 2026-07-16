@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+version="0.2.0"
+source_path="${BASH_SOURCE[0]}"
+while [[ -L "$source_path" ]]; do
+  source_dir="$(cd -- "$(dirname -- "$source_path")" && pwd)"
+  source_path="$(readlink "$source_path")"
+  [[ "$source_path" = /* ]] || source_path="$source_dir/$source_path"
+done
+prefix="${RECORD_PREFIX:-$(cd -- "$(dirname -- "$source_path")/.." && pwd)}"
+runtime_dir="$prefix/libexec/record"
+marketplace_dir="$prefix/share/record/marketplace"
+
+usage() {
+  cat <<'USAGE'
+Usage: record <command> [options]
+
+  record capture <capture-command> [options]
+  record transcribe [transcribe-options]
+  record doctor
+  record setup
+  record plugin install
+  record --version
+USAGE
+}
+
+require_executable() {
+  local path="$1"
+  local label="$2"
+  [[ -x "$path" ]] || {
+    echo "$label runtime was not found at $path. Reinstall record with Homebrew." >&2
+    exit 127
+  }
+}
+
+run_doctor() {
+  local exit_code=0
+  require_executable "$runtime_dir/capture/capture" "capture"
+  require_executable "$runtime_dir/transcribe" "transcribe"
+  echo "==> capture"
+  "$runtime_dir/capture/capture" doctor || exit_code=1
+  echo "==> transcribe"
+  "$runtime_dir/transcribe" doctor || exit_code=1
+  return "$exit_code"
+}
+
+run_setup() {
+  local exit_code=0
+  require_executable "$runtime_dir/capture/capture" "capture"
+  require_executable "$runtime_dir/transcribe" "transcribe"
+  "$runtime_dir/transcribe" setup || exit_code=1
+  "$runtime_dir/capture/capture" setup || exit_code=1
+  return "$exit_code"
+}
+
+install_plugin() {
+  local plugin_marketplace="${RECORD_PLUGIN_MARKETPLACE:-${XDG_DATA_HOME:-$HOME/.local/share}/record/marketplace}"
+  local staging_marketplace="${plugin_marketplace}.staging-$$"
+  command -v codex >/dev/null 2>&1 || {
+    echo "Codex CLI was not found on PATH." >&2
+    exit 127
+  }
+  [[ -f "$marketplace_dir/.agents/plugins/marketplace.json" ]] || {
+    echo "Bundled Codex marketplace was not found at $marketplace_dir." >&2
+    exit 1
+  }
+  rm -rf "$staging_marketplace"
+  mkdir -p "$(dirname -- "$plugin_marketplace")"
+  ditto "$marketplace_dir" "$staging_marketplace"
+  rm -rf "$plugin_marketplace"
+  mv "$staging_marketplace" "$plugin_marketplace"
+  codex plugin marketplace add "$plugin_marketplace" --json
+  if codex plugin list --json 2>/dev/null | grep -q '"pluginId": "record@record"'; then
+    codex plugin remove record@record --json
+    codex plugin marketplace remove record --json || echo "Warning: old record marketplace could not be removed." >&2
+  fi
+  codex plugin add record@record-cli --json
+  echo "Record plugin installed. Start a new Codex task before using it."
+}
+
+command_name="${1:-help}"
+[[ $# -eq 0 ]] || shift
+
+case "$command_name" in
+  capture)
+    require_executable "$runtime_dir/capture/capture" "capture"
+    exec "$runtime_dir/capture/capture" "$@"
+    ;;
+  transcribe)
+    require_executable "$runtime_dir/transcribe" "transcribe"
+    exec "$runtime_dir/transcribe" "$@"
+    ;;
+  doctor)
+    [[ $# -eq 0 ]] || { echo "record doctor does not accept arguments; use record capture doctor --json or record transcribe doctor --json." >&2; exit 2; }
+    run_doctor
+    ;;
+  setup)
+    [[ $# -eq 0 ]] || { echo "record setup does not accept arguments; use the product-specific setup command for advanced options." >&2; exit 2; }
+    run_setup
+    ;;
+  plugin)
+    [[ "${1:-}" == "install" && $# -eq 1 ]] || { echo "Usage: record plugin install" >&2; exit 2; }
+    install_plugin
+    ;;
+  --version|-V)
+    [[ $# -eq 0 ]] || { echo "record --version does not accept arguments." >&2; exit 2; }
+    echo "$version"
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $command_name" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

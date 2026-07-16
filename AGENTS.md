@@ -35,7 +35,7 @@ Prefer TypeScript when creating new general-purpose software. When the software 
 
 ## Project Context
 
-This is an npm workspace monorepo with two independent TypeScript CLIs: `packages/capture` for OBS-backed macOS app recording and `packages/transcribe` for local whisper.cpp transcription. The agent plugin source lives in `plugins/record`.
+This repository has native Swift capture and TypeScript transcription runtimes behind the Homebrew-distributed `record` CLI. The agent plugin source lives in `plugins/record`.
 
 ## Scope
 
@@ -50,6 +50,7 @@ npm run setup:transcribe
 npm run setup
 npm run build:bundle
 npm run build:binary:macos-arm64
+npm run test:record
 npm run doctor
 npm run install:local
 npm run plugin:smoke
@@ -75,18 +76,20 @@ npm --workspace transcribe run transcribe -- <args>
 - For CLI source changes, run the package help command and `npm run build:bundle`.
 - For binary/install script changes, run `npm run build:binary:macos-arm64` when feasible.
 - For plugin manifest, skill, helper script, or plugin README changes, run `npm run plugin:smoke`.
-- Treat `doctor` failures from missing OBS, inactive OBS WebSocket, missing Whisper, or missing model as environment checks; report them instead of hiding them.
+- Treat `doctor` failures from missing Screen & System Audio Recording permission, missing Whisper, or missing model as environment checks; report them instead of hiding them.
 
 ## Structure
 
-- `packages/capture`: OBS recording CLI.
+- `packages/capture`: native ScreenCaptureKit recording CLI and on-demand app agent.
 - `packages/transcribe`: local transcription CLI.
+- `scripts/record`: unified installed CLI dispatcher.
+- `packaging/marketplace`: marketplace bundled with Homebrew releases.
 - `plugins/record`: local agent plugin manifests, skills, and helper scripts.
 - `dist/`, `node_modules/`, `runs/`, recordings, transcripts, and local config are generated and must stay untracked.
 
 ## Boundaries
 
-- Keep `capture` and `transcribe` as separate CLIs; do not add a combined `record` executable unless requested.
+- Keep capture and transcription runtime code separate behind the `record` command.
 - Do not introduce private package registries, local absolute paths, or machine-specific plugin metadata files.
 - Do not commit recordings, transcripts, local run output, build artifacts, dependencies, secrets, or environment files.
 - Treat recording and transcription artifacts as sensitive by default.

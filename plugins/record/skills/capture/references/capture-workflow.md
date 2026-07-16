@@ -2,10 +2,11 @@
 
 ## Adapter Boundary
 
-The plugin wraps the installed `capture` binary. It must not vendor runtime code or add a top-level `record` command. If the binary is missing, tell the user to run:
+The plugin wraps `record capture`. If the CLI is missing, tell the user to run:
 
 ```bash
-npm run setup:capture
+brew tap jlave-dev/record https://github.com/jlave-dev/record.git
+brew install jlave-dev/record/record
 ```
 
 ## Start
@@ -18,7 +19,7 @@ npm run setup:capture
 <plugin-root>/scripts/run-capture.sh start --app APP
 ```
 
-Only pass `--output`, `--width`, `--height`, or `--video-bitrate` when the user asks for them.
+Only pass `--output`, `--width`, or `--height` when the user asks for them.
 
 ## Stop And Report
 
@@ -34,8 +35,8 @@ After success, report the recording path and metadata path when the CLI returns 
 
 When capture fails, triage in this order:
 
-1. Run `capture doctor --json`.
-2. For app resolution failures, run `capture apps --json`.
-3. Only after those checks, suggest setup or restart steps such as `npm run setup:capture`, relaunching OBS, or checking macOS permissions.
+1. Run `record capture doctor --json`.
+2. For app resolution failures, run `record capture apps --json`.
+3. Only after those checks, suggest `record capture setup` or enabling Screen & System Audio Recording permission for CaptureAgent.
 
-Treat missing OBS, inactive OBS WebSocket, and macOS permission problems as environment checks. Report them plainly with the next command to run.
+Treat missing macOS permission as an environment check. Report it plainly with the next command to run.

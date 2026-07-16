@@ -1,105 +1,79 @@
 # record
 
-Local macOS capture and transcription tooling for agent workflows.
+Native macOS app capture and local transcription for humans and Codex.
 
-`record` is an npm workspace with two independent CLIs:
+The installed product is one command with two runtime surfaces:
 
-- `capture` records one visible macOS application through OBS Studio.
-- `transcribe` converts a local audio or video file into transcript artifacts with local whisper.cpp.
+```bash
+record capture start --app chrome
+record capture stop
+record transcribe --input /path/to/recording.mp4 --output /path/to/transcript
+```
 
-The tools are often used together, but they stay separate. There is no top-level `record` executable. Recordings, source media, transcripts, metadata, configuration, and runtime state stay on the local machine by default.
+Capture uses ScreenCaptureKit and application audio. Transcription uses local whisper.cpp. Recordings, source media, transcripts, metadata, configuration, and runtime state stay on the local machine by default.
 
 > [!IMPORTANT]
-> You are responsible for making sure each recording is legal and allowed by the policies that apply where you live, work, study, or communicate. Recording consent laws vary by jurisdiction, and workplace, school, client, meeting, or platform policies may be stricter than local law. This project does not decide whether a recording is permitted.
+> You are responsible for making sure each recording is legal and allowed by applicable consent laws and workplace, school, client, meeting, and platform policies.
 
-## Requirements
+## Install
 
-- macOS.
-- Node.js 22 or newer.
-- OBS Studio installed in `/Applications`.
-- OBS WebSocket enabled on port `4455`; `capture setup` writes the local OBS WebSocket config.
-- Homebrew for `transcribe setup`.
-- `ffmpeg`, `ffprobe`, and `whisper-cli`; `transcribe setup` installs `whisper-cpp` with Homebrew when needed.
-- `~/.local/bin` on `PATH` if you want to use the installed `capture` and `transcribe` launchers directly.
-
-## Quick Start
+The intended release install is:
 
 ```bash
-npm install
-npm run setup
-npm run doctor
+brew tap jlave-dev/record https://github.com/jlave-dev/record.git
+brew install jlave-dev/record/record
+record plugin install
 ```
 
-`npm run setup` builds both packages, configures local defaults, installs launchers into `~/.local/bin`, and runs package doctors. If OBS is open while setup updates its profile, scene collection, or WebSocket config, restart OBS before running `capture doctor`.
+Homebrew installs the `record` command plus `ffmpeg` and `whisper-cpp`. The release contains a self-contained transcription executable and a signed `CaptureAgent.app`; users do not need Node.js, npm, Swift, or Xcode.
 
-Record an app, then transcribe the resulting video:
+Requirements:
+
+- macOS 15 or newer.
+- Apple silicon.
+- Screen & System Audio Recording permission for CaptureAgent.
+- About 1.6 GB of free space for the default Whisper model.
+
+The first capture may require:
 
 ```bash
-capture start --app chrome
-# use the app while OBS records it
-capture stop
-
-transcribe --input ~/Movies/capture/<run>/recording.mp4 --output ~/Movies/capture/<run>/transcript
+record capture setup
 ```
 
-Use the `output_path` returned by `capture stop` for the real recording path; OBS names the final media file.
-
-## Capture CLI
-
-`capture` records a selected Mac app through a dedicated OBS profile and scene collection.
-
-Common commands:
+The first transcription downloads and verifies the default model:
 
 ```bash
-capture setup
-capture doctor
-capture apps
-capture config --json
-capture config set video_bitrate 6000
-capture start --app firefox --json
-capture status --json
-capture pause
-capture resume
-capture stop --json
+record transcribe setup
 ```
 
-App values can be friendly aliases, installed app names, bundle identifiers, or `.app` paths. Built-in aliases include `chrome`, `firefox`, and `zoom`.
+## Capture
+
+```bash
+record capture apps
+record capture start --app firefox --json
+record capture status --json
+record capture stop --json
+record capture doctor --json
+```
 
 Defaults:
 
 - Output root: `~/Movies/capture`.
-- Video size: `1920x1080`.
-- Video bitrate: `6000` kbps.
-- Capture mode: macOS application capture.
-- Metadata: `metadata.json` beside each recording.
-- Runtime state: `~/.local/share/capture/state.json`.
-- Config: `$XDG_CONFIG_HOME/capture/config.toml` or `~/.config/capture/config.toml`.
+- Source resolution capped at `2560x1440` unless overridden.
+- H.264 video and application-level AAC audio in MP4.
+- Metadata beside each recording.
+- Runtime state under `~/.local/share/capture-native`.
 
-Useful start options:
+The target app must be running with a visible shareable window when capture starts. App values may be friendly aliases, app names, bundle identifiers, or `.app` paths.
 
-```bash
-capture start \
-  --app chrome \
-  --output ~/Movies/capture/chrome-test \
-  --width 1920 \
-  --height 1080 \
-  --video-bitrate 6000
-```
-
-The target app must have a visible capturable window when recording starts. Once OBS has the application source, you can switch focus to another app while capture continues.
-
-## Transcribe CLI
-
-`transcribe` turns a local audio or video file into local transcript artifacts.
-
-Common commands:
+## Transcribe
 
 ```bash
-transcribe setup
-transcribe doctor
-transcribe config --json
-transcribe --input /path/to/recording.mp4 --output /path/to/recording-transcript
-transcribe --input /path/to/recording.mp4 --output /path/to/recording-transcript --copy-source
+record transcribe doctor --json
+record transcribe setup
+record transcribe \
+  --input /path/to/recording.mp4 \
+  --output /path/to/recording-transcript
 ```
 
 Successful runs write:
@@ -110,101 +84,93 @@ Successful runs write:
 
 Defaults:
 
-- Whisper command: `whisper-cli`.
+- Engine: `whisper-cli`.
 - Model: `~/.local/share/transcribe/models/ggml-large-v3-turbo.bin`.
 - Config: `$XDG_CONFIG_HOME/transcribe/config.toml` or `~/.config/transcribe/config.toml`.
 
-The default model is downloaded with a temporary file and validated by byte size before it is installed. `transcribe doctor` reports missing tools, unreadable models, and partial model downloads.
+The model download is written through a temporary file and verified by byte size and SHA-256 before installation.
 
-## Agent Plugin
+## Codex Plugin
 
-The local Codex plugin lives in [`plugins/record`](plugins/record). It packages two adapter skills:
+The marketplace lives at `.agents/plugins/marketplace.json`. The Homebrew release also carries a matching local marketplace so CLI and plugin versions cannot drift.
 
-- `$capture` wraps the installed `capture` CLI.
-- `$transcribe` wraps the installed `transcribe` CLI.
-
-The plugin does not install or replace the runtime CLIs. Install the CLIs first with:
+Install the bundled plugin with:
 
 ```bash
-npm run setup
+record plugin install
 ```
 
-Validate the plugin adapter with:
+Then start a new Codex task. The plugin exposes:
 
-```bash
-npm run plugin:smoke
-```
+- `$capture`
+- `$transcribe`
+
+The skills are thin adapters around `record capture` and `record transcribe`.
 
 ## Development
 
-Build both packages:
+Development requirements:
+
+- Node.js 22 or newer.
+- Bun for the self-contained transcription build.
+- Xcode Command Line Tools.
+- Homebrew with `ffmpeg` and `whisper-cpp` for live transcription tests.
 
 ```bash
+npm install
 npm run build:bundle
+npm run build:binary:macos-arm64
+npm run test:record
+npm run plugin:smoke
 ```
 
-Run package CLIs from the workspace:
+Install a development build locally:
+
+```bash
+npm run install:local
+record doctor
+```
+
+Package-specific development remains available:
 
 ```bash
 npm --workspace capture run capture -- --help
 npm --workspace transcribe run transcribe -- --help
 ```
 
-Create local launchers:
+## Release
 
 ```bash
-npm run install:local
+npm run build:release:macos-arm64
 ```
 
-Create Node-backed macOS arm64 launcher artifacts:
+This creates `dist/release/record-<version>-macos-arm64.tar.gz`. Local archives use the available development signing identity and are not publishable.
 
-```bash
-npm run build:binary:macos-arm64
-```
+Releases from `main` use semantic-release and Conventional Commits to choose the next version. The macOS arm64 release job then:
 
-Run the combined environment check:
+1. Updates the workspace, CLI, plugin, and Formula versions.
+2. Signs CaptureAgent, capture, and transcribe with Developer ID and hardened runtime.
+3. Notarizes the assembled bundle and staples the CaptureAgent ticket.
+4. Builds the final archive and writes its SHA-256 to `Formula/record.rb`.
+5. Commits the generated versions and Formula checksum with `[skip ci]`.
+6. Creates the Git tag and GitHub release with the exact Homebrew archive.
 
-```bash
-npm run doctor
-```
+The first automated run locally seeds the original repository commit as the `v0.1.0` baseline, so the native capture feature releases as `v0.2.0` instead of semantic-release's default first version of `v1.0.0`. Later runs use the published tags normally.
 
-## Troubleshooting
+The repository needs these GitHub Actions secrets:
 
-`capture doctor` fails on OBS connectivity:
+- `APPLE_DEVELOPER_ID_CERTIFICATE_P12`: base64-encoded Developer ID Application certificate and private key.
+- `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`: password used when exporting that P12.
+- `APPLE_NOTARIZATION_KEY_P8`: base64-encoded App Store Connect team API key.
+- `APPLE_NOTARIZATION_KEY_ID`: API key ID.
+- `APPLE_NOTARIZATION_ISSUER_ID`: API issuer ID.
 
-- Open or restart OBS after `capture setup`.
-- Confirm OBS WebSocket is enabled on port `4455`.
-- Check macOS Screen Recording permissions for OBS.
-
-`capture start` says the app has no visible capturable window:
-
-- Open the app and make sure at least one non-minimized window is visible.
-- Run `capture apps --json` to confirm how the app resolves.
-
-`transcribe doctor` reports a missing or partial model:
-
-- Run `transcribe setup --force`.
-- Confirm there is enough disk space for the `ggml-large-v3-turbo.bin` model.
-
-`capture` or `transcribe` is not found after setup:
-
-- Add `~/.local/bin` to `PATH`, or run through npm with `npm --workspace <package> run <command> -- ...`.
+Use `npm run release:dry-run` to inspect the next semantic version without publishing. A public release intentionally fails rather than falling back to development signing or skipping notarization.
 
 ## Sensitive Artifacts
 
-Generated media and transcripts are sensitive by default. The repository ignores dependencies, build output, recordings, transcripts, local run output, media files, environment files, and local config directories.
-
-Do not commit:
-
-- recordings or source media
-- transcripts or metadata from real runs
-- local config, secrets, or environment files
-- `dist/`, `node_modules/`, or other generated output
-
-## Support
-
-Use GitHub issues for bugs and setup problems: [jlave-dev/record](https://github.com/jlave-dev/record/issues).
+Do not commit recordings, transcripts, real source media, runtime output, local configuration, dependencies, or build output.
 
 ## License
 
-The packages and plugin metadata declare MIT licensing. Add a root `LICENSE` file before publishing outside this repository.
+MIT. See [LICENSE](LICENSE).
