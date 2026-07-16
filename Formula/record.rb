@@ -6,7 +6,7 @@ class Record < Formula
   homepage "https://github.com/jlave-dev/record"
   url "https://github.com/jlave-dev/record/releases/download/v0.2.0/record-0.2.0-macos-arm64.tar.gz"
   version "0.2.0"
-  sha256 "0a7e7d34ebb9f14ae2dc0ac1d4b8db4973fe3d2985a30b02302e3c1a3f37e39d"
+  sha256 "d0273933b24abf6385421f0d3aabea449e9bbffa5aab20ae3754dec37e79fc03"
   license "MIT"
 
   depends_on arch: :arm64
