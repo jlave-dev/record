@@ -5,8 +5,7 @@
 The plugin wraps `record transcribe`. If the CLI is missing, tell the user to run:
 
 ```bash
-brew tap jlave-dev/record https://github.com/jlave-dev/record.git
-brew install jlave-dev/record/record
+brew install jlave-dev/tap/record
 ```
 
 ## Transcribe

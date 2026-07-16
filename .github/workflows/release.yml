@@ -126,10 +126,54 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HOMEBREW_TAP_DEPLOY_KEY:-}" ]]; then
+            echo "HOMEBREW_TAP_DEPLOY_KEY is required."
+            exit 1
+          fi
+
+          tap_dir="$RUNNER_TEMP/homebrew-tap"
+          tap_key_path="$RUNNER_TEMP/homebrew-tap-deploy-key"
+          known_hosts_path="$RUNNER_TEMP/github-known-hosts"
+          printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$tap_key_path"
+          chmod 600 "$tap_key_path"
+          printf '%s\n' \
+            'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' \
+            > "$known_hosts_path"
+          {
+            echo "HOMEBREW_TAP_KEY_PATH=$tap_key_path"
+            echo "HOMEBREW_TAP_KNOWN_HOSTS_PATH=$known_hosts_path"
+          } >> "$GITHUB_ENV"
+
+          export GIT_SSH_COMMAND="ssh -i $tap_key_path -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_path"
+          git clone git@github.com:jlave-dev/homebrew-tap.git "$tap_dir"
+          cp Formula/record.rb "$tap_dir/Formula/record.rb"
+
+          if git -C "$tap_dir" diff --quiet -- Formula/record.rb; then
+            echo "Homebrew tap is already current."
+            exit 0
+          fi
+
+          version="$(sed -n 's/^[[:space:]]*version "\([^"]*\)"/\1/p' Formula/record.rb)"
+          [[ -n "$version" ]] || {
+            echo "Could not read the Record version from Formula/record.rb."
+            exit 1
+          }
+          git -C "$tap_dir" config user.name "github-actions[bot]"
+          git -C "$tap_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$tap_dir" add Formula/record.rb
+          git -C "$tap_dir" commit -m "record $version"
+          git -C "$tap_dir" push origin main
+
       - name: Clean up signing material
         if: always()
         run: |
           rm -f "${APPLE_NOTARIZATION_KEY_PATH:-}"
+          rm -f "${HOMEBREW_TAP_KEY_PATH:-}" "${HOMEBREW_TAP_KNOWN_HOSTS_PATH:-}"
           if [[ -n "${RECORD_SIGNING_KEYCHAIN:-}" && -f "$RECORD_SIGNING_KEYCHAIN" ]]; then
             security delete-keychain "$RECORD_SIGNING_KEYCHAIN" || true
           fi

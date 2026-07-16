@@ -17,11 +17,10 @@ Capture uses ScreenCaptureKit and application audio. Transcription uses local wh
 
 ## Install
 
-The intended release install is:
+Install the latest release:
 
 ```bash
-brew tap jlave-dev/record https://github.com/jlave-dev/record.git
-brew install jlave-dev/record/record
+brew install jlave-dev/tap/record
 record plugin install
 ```
 
@@ -154,6 +153,7 @@ Releases from `main` use semantic-release and Conventional Commits to choose the
 4. Builds the final archive and writes its SHA-256 to `Formula/record.rb`.
 5. Commits the generated versions and Formula checksum with `[skip ci]`.
 6. Creates the Git tag and GitHub release with the exact Homebrew archive.
+7. Updates `Formula/record.rb` in `jlave-dev/homebrew-tap`.
 
 The first automated run locally seeds the original repository commit as the `v0.1.0` baseline, so the native capture feature releases as `v0.2.0` instead of semantic-release's default first version of `v1.0.0`. Later runs use the published tags normally.
 
@@ -164,6 +164,7 @@ The repository needs these GitHub Actions secrets:
 - `APPLE_NOTARIZATION_KEY_P8`: base64-encoded App Store Connect team API key.
 - `APPLE_NOTARIZATION_KEY_ID`: API key ID.
 - `APPLE_NOTARIZATION_ISSUER_ID`: API issuer ID.
+- `HOMEBREW_TAP_DEPLOY_KEY`: write-enabled deploy key for `jlave-dev/homebrew-tap`.
 
 Use `npm run release:dry-run` to inspect the next semantic version without publishing. A public release intentionally fails rather than falling back to development signing or skipping notarization.
 

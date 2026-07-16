@@ -19,7 +19,7 @@ fail() {
 
 require_record() {
   if ! command -v record >/dev/null 2>&1; then
-    fail "record CLI was not found on PATH." "run \`brew tap jlave-dev/record https://github.com/jlave-dev/record.git\`, then \`brew install jlave-dev/record/record\`." 127
+    fail "record CLI was not found on PATH." "run \`brew install jlave-dev/tap/record\`." 127
   fi
 }
 

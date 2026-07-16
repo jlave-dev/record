@@ -10,8 +10,7 @@ The plugin does not install native dependencies. Install the CLI first:
 ## Setup
 
 ```bash
-brew tap jlave-dev/record https://github.com/jlave-dev/record.git
-brew install jlave-dev/record/record
+brew install jlave-dev/tap/record
 record plugin install
 ```
 
