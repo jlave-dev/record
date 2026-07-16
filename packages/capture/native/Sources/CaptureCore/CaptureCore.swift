@@ -1,4 +1,5 @@
 import Darwin
+import CoreGraphics
 import Foundation
 
 public enum CaptureAction: String, Codable {
@@ -207,6 +208,48 @@ public func recordingDimensions(sourceWidth: Double, sourceHeight: Double, reque
         max(2, Int(value.rounded()) / 2 * 2)
     }
     return (even(width), even(height))
+}
+
+public func bestOverlappingDisplayIndex(for frame: CGRect, displayFrames: [CGRect]) -> Int? {
+    guard let index = displayFrames.indices.max(by: {
+        frame.intersection(displayFrames[$0]).area < frame.intersection(displayFrames[$1]).area
+    }), frame.intersection(displayFrames[index]).area > 0 else { return nil }
+    return index
+}
+
+public func localCaptureRect(for frame: CGRect, in displayFrame: CGRect) -> CGRect? {
+    let clipped = frame.intersection(displayFrame)
+    guard !clipped.isNull, clipped.width > 0, clipped.height > 0 else { return nil }
+    return CGRect(
+        x: clipped.minX - displayFrame.minX,
+        y: clipped.minY - displayFrame.minY,
+        width: clipped.width,
+        height: clipped.height
+    )
+}
+
+public func isZoomWindowShareMarker(_ marker: CGRect, inside sharedFrame: CGRect) -> Bool {
+    marker.width >= 40 && marker.width <= 120 &&
+        marker.height >= 10 && marker.height <= 40 &&
+        marker.minX >= sharedFrame.minX && marker.maxX <= sharedFrame.minX + 120 &&
+        marker.minY >= sharedFrame.minY && marker.maxY <= sharedFrame.minY + 90
+}
+
+public func bestMatchingWindowIndex(for frame: CGRect, windowFrames: [CGRect], minimumOverlap: CGFloat = 0.8) -> Int? {
+    guard let index = windowFrames.indices.max(by: {
+        frame.intersectionOverUnion(windowFrames[$0]) < frame.intersectionOverUnion(windowFrames[$1])
+    }), frame.intersectionOverUnion(windowFrames[index]) >= minimumOverlap else { return nil }
+    return index
+}
+
+private extension CGRect {
+    var area: CGFloat { isNull ? 0 : width * height }
+
+    func intersectionOverUnion(_ other: CGRect) -> CGFloat {
+        let intersectionArea = intersection(other).area
+        let unionArea = area + other.area - intersectionArea
+        return unionArea > 0 ? intersectionArea / unionArea : 0
+    }
 }
 
 public func processExists(_ pid: Int32?) -> Bool {

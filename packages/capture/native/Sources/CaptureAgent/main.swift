@@ -45,8 +45,23 @@ final class CaptureDelegate: NSObject, SCRecordingOutputDelegate, SCStreamDelega
     }
 }
 
+private enum CaptureSourceKey: Equatable {
+    case application(CGDirectDisplayID)
+    case zoomShare(CGDirectDisplayID, CGRect)
+    case zoomWindowShare(CGDirectDisplayID, CGWindowID, CGRect)
+}
+
+private struct CaptureSource {
+    let key: CaptureSourceKey
+    let filter: SCContentFilter
+    let audioFilter: SCContentFilter
+    let sourceRect: CGRect
+}
+
 @main
 struct CaptureAgent {
+    static let zoomBundleID = "us.zoom.xos"
+
     static func main() async {
         var request: CaptureRequest?
         do {
@@ -102,15 +117,12 @@ struct CaptureAgent {
             let candidates = descriptors.filter { $0.name.lowercased().contains(requestedApp.lowercased()) }.map(\.name).joined(separator: ", ")
             throw CaptureCoreError.message(candidates.isEmpty ? "Could not resolve shareable app \"\(requestedApp)\"." : "App \"\(requestedApp)\" is ambiguous: \(candidates)")
         }
-        guard let display = bestDisplay(for: application, content: content) else {
-            throw CaptureCoreError.message("No display contains a visible window for \(application.applicationName).")
-        }
-
-        let filter = SCContentFilter(display: display, including: [application], exceptingWindows: [])
-        let info = SCShareableContent.info(for: filter)
+        var source = try captureSource(for: application, content: content)
+        let info = SCShareableContent.info(for: source.filter)
+        let sourceSize = source.sourceRect.isEmpty ? info.contentRect.size : source.sourceRect.size
         let dimensions = try recordingDimensions(
-            sourceWidth: info.contentRect.width * CGFloat(info.pointPixelScale),
-            sourceHeight: info.contentRect.height * CGFloat(info.pointPixelScale),
+            sourceWidth: sourceSize.width * CGFloat(info.pointPixelScale),
+            sourceHeight: sourceSize.height * CGFloat(info.pointPixelScale),
             requestedWidth: request.width,
             requestedHeight: request.height
         )
@@ -123,14 +135,16 @@ struct CaptureAgent {
         configuration.scalesToFit = true
         configuration.preservesAspectRatio = true
         configuration.showsCursor = true
-        configuration.capturesAudio = true
+        configuration.sourceRect = source.sourceRect
+        let usesSeparateZoomAudio = application.bundleIdentifier == zoomBundleID
+        configuration.capturesAudio = !usesSeparateZoomAudio
         configuration.excludesCurrentProcessAudio = true
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
 
         let events = RecordingEvents()
         let delegate = CaptureDelegate(events: events)
-        let stream = SCStream(filter: filter, configuration: configuration, delegate: delegate)
+        let stream = SCStream(filter: source.filter, configuration: configuration, delegate: delegate)
         let recordingConfiguration = SCRecordingOutputConfiguration()
         recordingConfiguration.outputURL = outputURL
         recordingConfiguration.outputFileType = .mp4
@@ -138,11 +152,51 @@ struct CaptureAgent {
         let recordingOutput = SCRecordingOutput(configuration: recordingConfiguration, delegate: delegate)
         try stream.addRecordingOutput(recordingOutput)
 
+        let audioOutputURL = URL(fileURLWithPath: outputDir).appendingPathComponent(".zoom-audio.mp4")
+        var audioStream: SCStream?
+        var audioEvents: RecordingEvents?
+        var audioDelegate: CaptureDelegate?
+        if usesSeparateZoomAudio {
+            // The share-video filter hides Zoom windows, so preserve meeting audio on its own stream.
+            let audioConfiguration = SCStreamConfiguration()
+            audioConfiguration.width = 2
+            audioConfiguration.height = 2
+            audioConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+            audioConfiguration.queueDepth = 2
+            audioConfiguration.showsCursor = false
+            audioConfiguration.capturesAudio = true
+            audioConfiguration.excludesCurrentProcessAudio = true
+            audioConfiguration.sampleRate = 48_000
+            audioConfiguration.channelCount = 2
+
+            let events = RecordingEvents()
+            let delegate = CaptureDelegate(events: events)
+            let zoomAudioStream = SCStream(filter: source.audioFilter, configuration: audioConfiguration, delegate: delegate)
+            let zoomAudioRecordingConfiguration = SCRecordingOutputConfiguration()
+            zoomAudioRecordingConfiguration.outputURL = audioOutputURL
+            zoomAudioRecordingConfiguration.outputFileType = .mp4
+            zoomAudioRecordingConfiguration.videoCodecType = .h264
+            try zoomAudioStream.addRecordingOutput(SCRecordingOutput(configuration: zoomAudioRecordingConfiguration, delegate: delegate))
+            audioStream = zoomAudioStream
+            audioEvents = events
+            audioDelegate = delegate
+        }
+        defer { _ = audioDelegate }
+
         var captureStarted = false
+        var audioCaptureStarted = false
         do {
-            try await stream.startCapture()
+            if let audioStream {
+                async let startVideo: Void = stream.startCapture()
+                async let startAudio: Void = audioStream.startCapture()
+                _ = try await (startVideo, startAudio)
+                audioCaptureStarted = true
+            } else {
+                try await stream.startCapture()
+            }
             captureStarted = true
             try await waitForEvent(events, wanted: .started, timeout: 15)
+            if let audioEvents { try await waitForEvent(audioEvents, wanted: .started, timeout: 15) }
 
             state.status = .recording
             state.appName = application.applicationName
@@ -152,17 +206,47 @@ struct CaptureAgent {
             state.startedAt = nowISO8601()
             try writeJSON(state, to: CapturePaths.state)
 
+            var nextSourceRefresh = Date()
             while true {
                 if let stopToken = try? String(contentsOf: CapturePaths.stop, encoding: .utf8), stopToken == request.token { break }
                 if case .failed(let message) = await events.snapshot() { throw CaptureCoreError.message(message) }
+                if application.bundleIdentifier == zoomBundleID, Date() >= nextSourceRefresh {
+                    nextSourceRefresh = Date().addingTimeInterval(0.5)
+                    if let refreshedContent = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+                       let refreshedApplication = refreshedContent.applications.first(where: { $0.processID == application.processID }),
+                       let desiredSource = try? captureSource(for: refreshedApplication, content: refreshedContent),
+                       desiredSource.key != source.key {
+                        do {
+                            if let audioStream { try await audioStream.updateContentFilter(desiredSource.audioFilter) }
+                            try await stream.updateContentFilter(desiredSource.filter)
+                            configuration.sourceRect = desiredSource.sourceRect
+                            try await stream.updateConfiguration(configuration)
+                            source = desiredSource
+                        } catch {
+                            FileHandle.standardError.write(Data("Could not follow Zoom share: \(error.localizedDescription)\n".utf8))
+                        }
+                    }
+                }
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
 
             state.status = .stopping
             try writeJSON(state, to: CapturePaths.state)
-            try await stream.stopCapture()
+            if let audioStream {
+                async let stopVideo: Void = stream.stopCapture()
+                async let stopAudio: Void = audioStream.stopCapture()
+                _ = try await (stopVideo, stopAudio)
+                audioCaptureStarted = false
+            } else {
+                try await stream.stopCapture()
+            }
             captureStarted = false
             try await waitForEvent(events, wanted: .finished, timeout: 15)
+            if let audioEvents {
+                try await waitForEvent(audioEvents, wanted: .finished, timeout: 15)
+                try await replaceAudio(in: outputURL, withAudioFrom: audioOutputURL)
+                try? FileManager.default.removeItem(at: audioOutputURL)
+            }
 
             let stoppedAt = nowISO8601()
             let metadata = CaptureMetadata(
@@ -182,12 +266,100 @@ struct CaptureAgent {
             try? FileManager.default.removeItem(at: CapturePaths.stop)
         } catch {
             if captureStarted { try? await stream.stopCapture() }
+            if audioCaptureStarted { try? await audioStream?.stopCapture() }
+            try? FileManager.default.removeItem(at: audioOutputURL)
             state.status = .failed
             state.error = error.localizedDescription
             state.stoppedAt = nowISO8601()
             try? writeJSON(state, to: CapturePaths.state)
             throw error
         }
+    }
+
+    private static func captureSource(for application: SCRunningApplication, content: SCShareableContent) throws -> CaptureSource {
+        if application.bundleIdentifier == zoomBundleID, let source = zoomShareSource(for: application, content: content) {
+            return source
+        }
+        guard let display = bestDisplay(for: application, content: content) else {
+            throw CaptureCoreError.message("No display contains a visible window for \(application.applicationName).")
+        }
+        return CaptureSource(
+            key: .application(display.displayID),
+            filter: SCContentFilter(display: display, including: [application], exceptingWindows: []),
+            audioFilter: SCContentFilter(display: display, including: [application], exceptingWindows: []),
+            sourceRect: .zero
+        )
+    }
+
+    private static func zoomShareSource(for application: SCRunningApplication, content: SCShareableContent) -> CaptureSource? {
+        // ponytail: Zoom has no public share-source API; add a Zoom SDK adapter if overlay titles stop being stable.
+        let windows = content.windows.filter { $0.owningApplication?.processID == application.processID }
+        let sharing = windows.contains { $0.title?.lowercased() == "zoom share statusbar window" }
+        guard sharing,
+              let overlay = windows.filter({ $0.title?.lowercased() == "annotation - zoom" && $0.frame.width > 100 && $0.frame.height > 100 })
+                .max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }),
+              let displayIndex = bestOverlappingDisplayIndex(for: overlay.frame, displayFrames: content.displays.map(\.frame)) else {
+            return nil
+        }
+
+        let display = content.displays[displayIndex]
+        guard let sourceRect = localCaptureRect(for: overlay.frame, in: display.frame) else { return nil }
+        if let sharedProcessID = content.windows.first(where: {
+            $0.title?.lowercased() == "window" &&
+                $0.owningApplication?.processID != application.processID &&
+                isZoomWindowShareMarker($0.frame, inside: overlay.frame)
+        })?.owningApplication?.processID {
+            let candidateWindows = content.windows.filter {
+                $0.owningApplication?.processID == sharedProcessID &&
+                    $0.frame.width > 100 && $0.frame.height > 100 &&
+                    intersectionArea($0.frame, display.frame) > 0
+            }
+            if let sharedWindowIndex = bestMatchingWindowIndex(for: overlay.frame, windowFrames: candidateWindows.map(\.frame)),
+               let sharedApplication = candidateWindows[sharedWindowIndex].owningApplication {
+                let sharedWindow = candidateWindows[sharedWindowIndex]
+                return CaptureSource(
+                    key: .zoomWindowShare(display.displayID, sharedWindow.windowID, .zero),
+                    filter: SCContentFilter(desktopIndependentWindow: sharedWindow),
+                    audioFilter: SCContentFilter(display: display, including: [application, sharedApplication], exceptingWindows: []),
+                    sourceRect: .zero
+                )
+            }
+        }
+
+        let zoomWindowsOnDisplay = windows.filter { intersectionArea($0.frame, display.frame) > 0 }
+        return CaptureSource(
+            key: .zoomShare(display.displayID, sourceRect),
+            filter: SCContentFilter(display: display, excludingApplications: [], exceptingWindows: zoomWindowsOnDisplay),
+            audioFilter: SCContentFilter(display: display, excludingApplications: [], exceptingWindows: []),
+            sourceRect: sourceRect
+        )
+    }
+
+    private static func replaceAudio(in videoURL: URL, withAudioFrom audioURL: URL) async throws {
+        let videoAsset = AVURLAsset(url: videoURL)
+        let audioAsset = AVURLAsset(url: audioURL)
+        guard let sourceVideo = try await videoAsset.loadTracks(withMediaType: .video).first,
+              let sourceAudio = try await audioAsset.loadTracks(withMediaType: .audio).first else {
+            throw CaptureCoreError.message("Zoom audio recording did not contain an audio track.")
+        }
+
+        let videoDuration = try await videoAsset.load(.duration)
+        let audioDuration = try await audioAsset.load(.duration)
+        let composition = AVMutableComposition()
+        guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
+              let audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw CaptureCoreError.message("Could not create the final Zoom recording tracks.")
+        }
+        try videoTrack.insertTimeRange(CMTimeRange(start: .zero, duration: videoDuration), of: sourceVideo, at: .zero)
+        try audioTrack.insertTimeRange(CMTimeRange(start: .zero, duration: CMTimeMinimum(videoDuration, audioDuration)), of: sourceAudio, at: .zero)
+
+        let mergedURL = videoURL.deletingLastPathComponent().appendingPathComponent(".recording-with-audio.mp4")
+        try? FileManager.default.removeItem(at: mergedURL)
+        guard let export = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+            throw CaptureCoreError.message("Could not create the final Zoom recording.")
+        }
+        try await export.export(to: mergedURL, as: .mp4)
+        _ = try FileManager.default.replaceItemAt(videoURL, withItemAt: mergedURL)
     }
 
     static func bestDisplay(for application: SCRunningApplication, content: SCShareableContent) -> SCDisplay? {

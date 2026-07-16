@@ -64,6 +64,7 @@ Defaults:
 - Runtime state under `~/.local/share/capture-native`.
 
 The target app must be running with a visible shareable window when capture starts. App values may be friendly aliases, app names, bundle identifiers, or `.app` paths.
+When Zoom shares local content, capture automatically follows the shared window or display with audio and returns to the Zoom windows when sharing stops.
 
 ## Transcribe
 
