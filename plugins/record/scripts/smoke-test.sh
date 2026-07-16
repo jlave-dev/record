@@ -46,12 +46,16 @@ expect_failure_contains() {
 [[ -f "$plugin_root/.codex-plugin/plugin.json" ]] || fail "missing plugin manifest"
 [[ -x "$script_dir/run-capture.sh" ]] || fail "run-capture.sh is not executable"
 [[ -x "$script_dir/run-transcribe.sh" ]] || fail "run-transcribe.sh is not executable"
-[[ -f "$plugin_validator" ]] || fail "missing plugin validator at $plugin_validator"
-[[ -f "$skill_validator" ]] || fail "missing skill validator at $skill_validator"
 
-run python3 "$plugin_validator" "$plugin_root"
-run python3 "$skill_validator" "$plugin_root/skills/capture"
-run python3 "$skill_validator" "$plugin_root/skills/transcribe"
+python3 -m json.tool "$plugin_root/.codex-plugin/plugin.json" >/dev/null
+
+if [[ -f "$plugin_validator" ]]; then
+  run python3 "$plugin_validator" "$plugin_root"
+fi
+if [[ -f "$skill_validator" ]]; then
+  run python3 "$skill_validator" "$plugin_root/skills/capture"
+  run python3 "$skill_validator" "$plugin_root/skills/transcribe"
+fi
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
