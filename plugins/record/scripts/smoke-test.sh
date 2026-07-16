@@ -67,13 +67,13 @@ safe_path="/usr/bin:/bin"
 expect_failure_contains \
   "missing record CLI for capture" \
   127 \
-  "brew tap jlave-dev/record" \
+  "brew install jlave-dev/tap/record" \
   env PATH="$safe_path" /bin/bash "$script_dir/run-capture.sh" status
 
 expect_failure_contains \
   "missing record CLI for transcribe" \
   127 \
-  "brew tap jlave-dev/record" \
+  "brew install jlave-dev/tap/record" \
   env PATH="$safe_path" /bin/bash "$script_dir/run-transcribe.sh" --input "$tmp_input" --output "$tmp_dir/out"
 
 expect_failure_contains \
