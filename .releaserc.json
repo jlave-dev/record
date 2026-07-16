@@ -1,0 +1,64 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    [
+      "@semantic-release/commit-analyzer",
+      {
+        "releaseRules": [
+          { "breaking": true, "release": "major" },
+          { "type": "feat", "release": "minor" },
+          { "type": "fix", "release": "patch" },
+          { "type": "perf", "release": "patch" },
+          { "type": "refactor", "release": "patch" },
+          { "type": "docs", "release": "patch" },
+          { "type": "chore", "release": "patch" },
+          { "type": "test", "release": "patch" },
+          { "type": "style", "release": "patch" },
+          { "type": "build", "release": "patch" },
+          { "type": "ci", "release": "patch" }
+        ]
+      }
+    ],
+    [
+      "@semantic-release/release-notes-generator",
+      {
+        "preset": "conventionalcommits"
+      }
+    ],
+    [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "./scripts/prepare-release.sh ${nextRelease.version}"
+      }
+    ],
+    [
+      "@semantic-release/git",
+      {
+        "assets": [
+          "package.json",
+          "package-lock.json",
+          "packages/*/package.json",
+          "packages/capture/native/Sources/CaptureCLI/main.swift",
+          "packages/transcribe/src/index.ts",
+          "plugins/record/.codex-plugin/plugin.json",
+          "scripts/record",
+          "Formula/record.rb"
+        ],
+        "message": "chore(release): ${nextRelease.version} [skip ci]"
+      }
+    ],
+    [
+      "@semantic-release/github",
+      {
+        "assets": [
+          {
+            "path": "dist/release/record-*-macos-arm64.tar.gz",
+            "name": "record-${nextRelease.version}-macos-arm64.tar.gz",
+            "label": "Record macOS arm64 release"
+          }
+        ]
+      }
+    ]
+  ]
+}

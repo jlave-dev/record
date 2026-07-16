@@ -1,8 +1,8 @@
 {
   "name": "record-workspace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Local macOS capture and transcription tooling workspace.",
+  "description": "Homebrew-distributed native macOS capture and local transcription CLI.",
   "type": "module",
   "workspaces": [
     "packages/capture",
@@ -11,12 +11,18 @@
   "scripts": {
     "setup:capture": "npm --workspace capture run setup",
     "setup:transcribe": "npm --workspace transcribe run setup",
-    "setup": "npm run setup:capture && npm run setup:transcribe",
+    "setup": "npm run install:local && $HOME/.local/bin/record setup",
     "build:bundle": "npm --workspaces run build",
-    "build:binary:macos-arm64": "npm --workspaces run build:binary:macos-arm64",
+    "build:binary:macos-arm64": "./scripts/build-release-macos-arm64.sh",
+    "build:release:macos-arm64": "./scripts/build-release-macos-arm64.sh",
     "doctor": "./scripts/doctor-all.sh",
-    "install:local": "npm --workspaces run install:local",
-    "plugin:smoke": "./plugins/record/scripts/smoke-test.sh"
+    "install:local": "./scripts/install-record-local.sh",
+    "plugin:smoke": "./plugins/record/scripts/smoke-test.sh",
+    "test:record": "./scripts/test-record-cli.sh",
+    "test": "npm --workspaces test && npm run test:record && npm run plugin:smoke && npm run version:check",
+    "version:check": "node scripts/update-release-version.mjs --check",
+    "release": "semantic-release",
+    "release:dry-run": "semantic-release --dry-run --no-ci"
   },
   "engines": {
     "node": ">=22"

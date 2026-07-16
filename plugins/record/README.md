@@ -1,24 +1,25 @@
 # record Plugin
 
-This plugin packages two local adapter skills for agents:
+This plugin packages two adapter skills for the Homebrew-installed `record` CLI:
 
-- `capture`: operate the installed `capture` CLI for OBS-backed Mac app recording.
-- `transcribe`: operate the installed `transcribe` CLI for local whisper.cpp transcription.
+- `capture`: run `record capture` for ScreenCaptureKit Mac app recording.
+- `transcribe`: run `record transcribe` for local whisper.cpp transcription.
 
-It does not install, vendor, or replace the runtime CLIs. The `capture` and `transcribe` binaries must already be installed on the same Mac and available on `PATH`.
+The plugin does not install native dependencies. Install the CLI first:
 
 ## Setup
 
 ```bash
-npm run setup:capture
-npm run setup:transcribe
+brew tap jlave-dev/record https://github.com/jlave-dev/record.git
+brew install jlave-dev/record/record
+record plugin install
 ```
 
-The helper scripts live in `plugins/record/scripts` and can be invoked from any working directory when called by path.
+The Homebrew release bundles this plugin and installs the matching version through `record plugin install`. The helper scripts can be invoked from any working directory when called by path.
 
 ## Skill Surface
 
-Do not add a top-level `record` skill. The plugin should expose the two real product surfaces: `capture` and `transcribe`.
+Do not add a top-level `record` skill. The plugin exposes the two task surfaces, while the CLI uses `record capture` and `record transcribe`.
 
 ## Validation
 
@@ -37,4 +38,4 @@ Recordings, source media, transcripts, metadata, configuration, and run output s
 
 ## Terms
 
-This plugin is a local adapter around user-installed command line tools. It provides no hosted service and does not change the setup, licensing, or operating requirements of `capture`, `transcribe`, OBS Studio, whisper.cpp, or local models.
+This plugin is a local adapter around the user-installed `record` command. It provides no hosted service and does not change the setup, licensing, or operating requirements of ScreenCaptureKit, whisper.cpp, or local models.

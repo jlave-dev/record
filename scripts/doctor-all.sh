@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set +e
 
-if [[ ! -x packages/capture/dist/index.js || ! -x packages/transcribe/dist/index.js ]]; then
+if [[ ! -x packages/capture/dist/capture || ! -x packages/transcribe/dist/index.js ]]; then
   npm run build:bundle
 fi
 
-node packages/capture/dist/index.js doctor
+packages/capture/dist/capture doctor
 capture_status=$?
 
 node packages/transcribe/dist/index.js doctor

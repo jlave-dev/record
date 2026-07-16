@@ -8,9 +8,6 @@ Usage:
 USAGE
 }
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-plugin_root="$(cd -- "$script_dir/.." && pwd)"
-
 fail() {
   local message="$1"
   local next="$2"
@@ -20,19 +17,19 @@ fail() {
   exit "$code"
 }
 
-require_transcribe() {
-  if ! command -v transcribe >/dev/null 2>&1; then
-    fail "transcribe binary was not found on PATH." "run \`npm run setup:transcribe\` from the record repo, or install transcribe so \`transcribe --help\` works." 127
+require_record() {
+  if ! command -v record >/dev/null 2>&1; then
+    fail "record CLI was not found on PATH." "run \`brew tap jlave-dev/record https://github.com/jlave-dev/record.git\`, then \`brew install jlave-dev/record/record\`." 127
   fi
 }
 
 run_transcribe() {
-  if transcribe "$@"; then
+  if record transcribe "$@"; then
     return 0
   fi
   local status=$?
   echo "transcribe failed." >&2
-  echo "Next: run \`transcribe doctor --json\`; if Whisper or the model is missing, run \`npm run setup:transcribe\`." >&2
+  echo "Next: run \`record transcribe doctor --json\`; if the model is missing, run \`record transcribe setup\`." >&2
   exit "$status"
 }
 
@@ -82,5 +79,5 @@ args=(--input "$input_path" --output "$output_dir" --json)
 [[ "$copy_source" -eq 1 ]] && args+=(--copy-source)
 [[ "$move_source" -eq 1 ]] && args+=(--move-source)
 
-require_transcribe
+require_record
 run_transcribe "${args[@]}"

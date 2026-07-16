@@ -1,7 +1,7 @@
 {
   "name": "record",
-  "version": "0.1.0",
-  "description": "Local adapter skills for installed capture and transcribe CLIs.",
+  "version": "0.2.0",
+  "description": "Adapter skills for the Homebrew-installed record CLI.",
   "author": {
     "name": "James Lave",
     "url": "https://github.com/jlave-dev"
@@ -13,7 +13,7 @@
     "capture",
     "transcription",
     "macos",
-    "obs",
+    "screencapturekit",
     "whisper",
     "local-first"
   ],
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "Record",
     "shortDescription": "Capture apps and transcribe local media.",
-    "longDescription": "Record exposes two local adapter skills for the installed capture and transcribe CLIs. It helps agents start and stop OBS-backed Mac app recordings and transcribe local media with whisper.cpp while keeping recordings, transcripts, metadata, and setup state on the user's machine.",
+    "longDescription": "Record exposes capture and transcribe skills for the Homebrew-installed record CLI. It helps agents start and stop native ScreenCaptureKit Mac app recordings and transcribe local media with whisper.cpp while keeping recordings, transcripts, metadata, and setup state on the user's machine.",
     "developerName": "James Lave",
     "category": "Productivity",
     "capabilities": [

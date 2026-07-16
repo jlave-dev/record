@@ -82,6 +82,7 @@ const AUDIO_EXTENSIONS = new Set([".aac", ".aiff", ".aif", ".flac", ".m4a", ".mp
 const VIDEO_EXTENSIONS = new Set([".avi", ".m4v", ".mkv", ".mov", ".mp4", ".mpeg", ".mpg", ".webm", ".wmv"]);
 const MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin";
 const DEFAULT_MODEL_BYTES = 1_624_555_275;
+const DEFAULT_MODEL_SHA256 = "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69";
 
 function expandHome(value: string): string {
   if (value === "~") return homedir();
@@ -633,6 +634,13 @@ function downloadFile(url: string, destination: string): void {
     if (destination === defaultModelPath() && stats.size !== DEFAULT_MODEL_BYTES) {
       fail(`Downloaded model was ${stats.size} bytes; expected ${DEFAULT_MODEL_BYTES}.`);
     }
+    if (destination === defaultModelPath()) {
+      const checksum = run("/usr/bin/shasum", ["-a", "256", tempDestination]);
+      const actual = checksum.stdout.trim().split(/\s+/)[0];
+      if (checksum.status !== 0 || actual !== DEFAULT_MODEL_SHA256) {
+        fail(`Downloaded model checksum did not match. Expected ${DEFAULT_MODEL_SHA256}, received ${actual || "no checksum"}.`);
+      }
+    }
 
     renameSync(tempDestination, destination);
   } catch (error) {
@@ -651,11 +659,13 @@ async function commandSetup(options: { force?: boolean; dryRun?: boolean; json?:
   const whisperExecutable = splitCommandLine(config.whisper_command)[0] ?? config.whisper_command;
   const modelPath = resolve(expandHome(config.whisper_model));
   const brewAvailable = commandExists("brew");
+  const ffmpegAvailable = commandExists("ffmpeg") && commandExists("ffprobe");
   const whisperAvailable = commandExists(whisperExecutable);
   const modelCheck = modelAvailability(modelPath);
   const modelAvailable = modelCheck.ok;
   const actions = [
     { action: "verify_homebrew", required: true, status: brewAvailable ? "ok" : "missing" },
+    { action: "install_ffmpeg", required: !ffmpegAvailable, command: "brew install ffmpeg" },
     { action: "install_whisper_cpp", required: !whisperAvailable, command: "brew install whisper-cpp" },
     { action: "write_transcribe_config", path: configPath() },
     { action: "download_model", required: options.force || !modelAvailable, url: MODEL_URL, path: modelPath, current_status: modelCheck.details }
@@ -664,6 +674,10 @@ async function commandSetup(options: { force?: boolean; dryRun?: boolean; json?:
   if (!brewAvailable && !options.dryRun) fail("Homebrew was not found on PATH. Install Homebrew before running transcribe setup.");
 
   if (!options.dryRun) {
+    if (!ffmpegAvailable) {
+      const install = run("brew", ["install", "ffmpeg"]);
+      if (install.status !== 0) fail(`brew install ffmpeg failed: ${install.stderr.trim() || install.stdout.trim()}`);
+    }
     if (!whisperAvailable) {
       const install = run("brew", ["install", "whisper-cpp"]);
       if (install.status !== 0) fail(`brew install whisper-cpp failed: ${install.stderr.trim() || install.stdout.trim()}`);
@@ -675,8 +689,9 @@ async function commandSetup(options: { force?: boolean; dryRun?: boolean; json?:
   }
 
   const doctorChecks = options.dryRun ? undefined : gatherDoctorChecks(config);
+  const doctorOk = doctorChecks?.every((check) => check.ok);
   const payload = {
-    status: options.dryRun ? "dry-run" : "ok",
+    status: options.dryRun ? "dry-run" : doctorOk ? "ok" : "failed",
     actions,
     config_path: configPath(),
     config,
@@ -686,12 +701,10 @@ async function commandSetup(options: { force?: boolean; dryRun?: boolean; json?:
   if (options.json) {
     printJson(payload);
   } else {
-    printHuman(options.dryRun ? "transcribe setup dry run:" : "transcribe setup complete.");
+    printHuman(options.dryRun ? "transcribe setup dry run:" : doctorOk ? "transcribe setup complete." : "transcribe setup failed doctor checks.");
     for (const action of actions) printHuman(`- ${action.action}${"path" in action ? `: ${action.path}` : ""}`);
-    if (!commandExists(join(homedir(), ".local", "bin"))) {
-      // No-op; the PATH warning belongs to install-local, but keep setup output concise.
-    }
   }
+  if (doctorOk === false) process.exitCode = 1;
 }
 
 function unknownCommand(name: string): never {
@@ -721,7 +734,7 @@ async function main(): Promise<void> {
   program
     .name("transcribe")
     .description("Transcribe a local audio or video file with local whisper.cpp.")
-    .version("0.1.0")
+    .version("0.2.0")
     .argument("[operands...]", "unsupported legacy command or positional operand")
     .option("--input <path>", "local audio or video input file")
     .option("--output <dir>", "output directory for transcript artifacts")
