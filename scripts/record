@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="0.3.0"
+version="0.4.0"
 source_path="${BASH_SOURCE[0]}"
 while [[ -L "$source_path" ]]; do
   source_dir="$(cd -- "$(dirname -- "$source_path")" && pwd)"
