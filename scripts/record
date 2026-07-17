@@ -11,6 +11,7 @@ done
 prefix="${RECORD_PREFIX:-$(cd -- "$(dirname -- "$source_path")/.." && pwd)}"
 runtime_dir="$prefix/libexec/record"
 marketplace_dir="$prefix/share/record/marketplace"
+plugin_state_dir="${RECORD_PLUGIN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/record/plugins}"
 
 usage() {
   cat <<'USAGE'
@@ -20,7 +21,7 @@ Usage: record <command> [options]
   record transcribe [transcribe-options]
   record doctor
   record setup
-  record plugin install
+  record plugin install [--codex|--claude]
   record --version
 USAGE
 }
@@ -54,29 +55,133 @@ run_setup() {
   return "$exit_code"
 }
 
+write_plugin_state() {
+  local name="$1"
+  local value="$2"
+  local marker="$plugin_state_dir/$name"
+  local temporary_marker="${marker}.tmp-$$"
+  mkdir -p "$plugin_state_dir"
+  printf '%s\n' "$value" > "$temporary_marker"
+  mv "$temporary_marker" "$marker"
+}
+
+plugin_is_installed() {
+  local host="$1"
+  local installed_plugins
+  command -v "$host" >/dev/null 2>&1 || return 2
+  installed_plugins="$("$host" plugin list --json 2>/dev/null)" || return 2
+  case "$host" in
+    codex) grep -Eq '"pluginId"[[:space:]]*:[[:space:]]*"record@(record-cli|record)"' <<<"$installed_plugins" ;;
+    claude) grep -Eq '"id"[[:space:]]*:[[:space:]]*"record@record-cli"' <<<"$installed_plugins" ;;
+  esac
+}
+
+install_codex_plugin() {
+  local plugin_marketplace="$1"
+  local installed_plugins
+  codex plugin marketplace add "$plugin_marketplace" --json
+  installed_plugins="$(codex plugin list --json 2>/dev/null)"
+  if grep -Eq '"pluginId"[[:space:]]*:[[:space:]]*"record@record"' <<<"$installed_plugins"; then
+    codex plugin remove record@record --json
+    codex plugin marketplace remove record --json || echo "Warning: old record marketplace could not be removed." >&2
+  fi
+  codex plugin add record@record-cli --json
+  write_plugin_state codex.version "$version"
+  echo "Record plugin installed for Codex. Start a new Codex task before using it."
+}
+
+install_claude_plugin() {
+  local plugin_marketplace="$1"
+  local installed_marketplaces
+  installed_marketplaces="$(claude plugin marketplace list --json 2>/dev/null)"
+  if grep -Eq '"name"[[:space:]]*:[[:space:]]*"record-cli"' <<<"$installed_marketplaces"; then
+    claude plugin marketplace remove record-cli --scope user
+  fi
+  claude plugin marketplace add "$plugin_marketplace" --scope user
+  claude plugin install record@record-cli --scope user
+  write_plugin_state claude.version "$version"
+  echo "Record plugin installed for Claude Code. Start a new session before using it."
+}
+
 install_plugin() {
+  local target="${1:-all}"
+  local install_codex=0
+  local install_claude=0
   local plugin_marketplace="${RECORD_PLUGIN_MARKETPLACE:-${XDG_DATA_HOME:-$HOME/.local/share}/record/marketplace}"
   local staging_marketplace="${plugin_marketplace}.staging-$$"
-  command -v codex >/dev/null 2>&1 || {
-    echo "Codex CLI was not found on PATH." >&2
-    exit 127
-  }
-  [[ -f "$marketplace_dir/.agents/plugins/marketplace.json" ]] || {
-    echo "Bundled Codex marketplace was not found at $marketplace_dir." >&2
-    exit 1
-  }
+
+  case "$target" in
+    all) install_codex=1; install_claude=1 ;;
+    --codex) install_codex=1 ;;
+    --claude) install_claude=1 ;;
+    *) echo "Usage: record plugin install [--codex|--claude]" >&2; return 2 ;;
+  esac
+
+  if [[ "$install_codex" -eq 1 ]]; then
+    command -v codex >/dev/null 2>&1 || { echo "Codex CLI was not found on PATH. Use --claude to install only the Claude Code plugin." >&2; return 127; }
+    [[ -f "$marketplace_dir/.agents/plugins/marketplace.json" ]] || {
+      echo "Bundled Codex marketplace was not found at $marketplace_dir." >&2
+      return 1
+    }
+  fi
+  if [[ "$install_claude" -eq 1 ]]; then
+    command -v claude >/dev/null 2>&1 || { echo "Claude Code CLI was not found on PATH. Use --codex to install only the Codex plugin." >&2; return 127; }
+    [[ -f "$marketplace_dir/.claude-plugin/marketplace.json" ]] || {
+      echo "Bundled Claude marketplace was not found at $marketplace_dir." >&2
+      return 1
+    }
+  fi
+
   rm -rf "$staging_marketplace"
   mkdir -p "$(dirname -- "$plugin_marketplace")"
   ditto "$marketplace_dir" "$staging_marketplace"
   rm -rf "$plugin_marketplace"
   mv "$staging_marketplace" "$plugin_marketplace"
-  codex plugin marketplace add "$plugin_marketplace" --json
-  if codex plugin list --json 2>/dev/null | grep -q '"pluginId": "record@record"'; then
-    codex plugin remove record@record --json
-    codex plugin marketplace remove record --json || echo "Warning: old record marketplace could not be removed." >&2
+
+  [[ "$install_codex" -eq 0 ]] || install_codex_plugin "$plugin_marketplace"
+  [[ "$install_claude" -eq 0 ]] || install_claude_plugin "$plugin_marketplace"
+}
+
+refresh_installed_plugins() {
+  local refresh_codex=0
+  local refresh_claude=0
+  local host marker scan_marker installed_version install_check target
+
+  for host in codex claude; do
+    marker="$plugin_state_dir/$host.version"
+    scan_marker="$plugin_state_dir/$host.scan"
+    installed_version=""
+    [[ ! -f "$marker" ]] || installed_version="$(<"$marker")"
+    [[ "$installed_version" != "$version" ]] || continue
+    if [[ -z "$installed_version" && -f "$scan_marker" && "$(<"$scan_marker")" == "$version" ]]; then
+      continue
+    fi
+
+    if plugin_is_installed "$host"; then
+      write_plugin_state "$host.version" pending
+      [[ "$host" == codex ]] && refresh_codex=1 || refresh_claude=1
+    else
+      install_check=$?
+      if [[ "$install_check" -eq 1 ]]; then
+        rm -f "$marker"
+        write_plugin_state "$host.scan" "$version"
+      fi
+    fi
+  done
+
+  [[ "$refresh_codex" -eq 1 || "$refresh_claude" -eq 1 ]] || return 0
+  if [[ "$refresh_codex" -eq 1 && "$refresh_claude" -eq 1 ]]; then
+    target=all
+  elif [[ "$refresh_codex" -eq 1 ]]; then
+    target=--codex
+  else
+    target=--claude
   fi
-  codex plugin add record@record-cli --json
-  echo "Record plugin installed. Start a new Codex task before using it."
+  if install_plugin "$target" >/dev/null; then
+    echo "Record plugins refreshed for version $version." >&2
+  else
+    echo "Warning: Record could not refresh installed agent plugins. Run \`record plugin install\` to retry." >&2
+  fi
 }
 
 command_name="${1:-help}"
@@ -84,24 +189,28 @@ command_name="${1:-help}"
 
 case "$command_name" in
   capture)
+    refresh_installed_plugins
     require_executable "$runtime_dir/capture/capture" "capture"
     exec "$runtime_dir/capture/capture" "$@"
     ;;
   transcribe)
+    refresh_installed_plugins
     require_executable "$runtime_dir/transcribe" "transcribe"
     exec "$runtime_dir/transcribe" "$@"
     ;;
   doctor)
     [[ $# -eq 0 ]] || { echo "record doctor does not accept arguments; use record capture doctor --json or record transcribe doctor --json." >&2; exit 2; }
+    refresh_installed_plugins
     run_doctor
     ;;
   setup)
     [[ $# -eq 0 ]] || { echo "record setup does not accept arguments; use the product-specific setup command for advanced options." >&2; exit 2; }
+    refresh_installed_plugins
     run_setup
     ;;
   plugin)
-    [[ "${1:-}" == "install" && $# -eq 1 ]] || { echo "Usage: record plugin install" >&2; exit 2; }
-    install_plugin
+    [[ "${1:-}" == "install" && $# -le 2 ]] || { echo "Usage: record plugin install [--codex|--claude]" >&2; exit 2; }
+    install_plugin "${2:-all}"
     ;;
   --version|-V)
     [[ $# -eq 0 ]] || { echo "record --version does not accept arguments." >&2; exit 2; }

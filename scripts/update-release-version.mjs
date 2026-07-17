@@ -42,6 +42,7 @@ async function checkVersion(expectedVersion) {
     "packages/capture/package.json",
     "packages/transcribe/package.json",
     "plugins/record/.codex-plugin/plugin.json",
+    "plugins/record/claude/.claude-plugin/plugin.json",
   ]) {
     checks.push([relativePath, (await readJson(relativePath)).version]);
   }
@@ -84,6 +85,7 @@ async function updateVersion(version) {
     "packages/capture/package.json",
     "packages/transcribe/package.json",
     "plugins/record/.codex-plugin/plugin.json",
+    "plugins/record/claude/.claude-plugin/plugin.json",
   ]) {
     const value = await readJson(relativePath);
     value.version = version;

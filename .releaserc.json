@@ -42,6 +42,7 @@
           "packages/capture/native/Sources/CaptureCLI/main.swift",
           "packages/transcribe/src/index.ts",
           "plugins/record/.codex-plugin/plugin.json",
+          "plugins/record/claude/.claude-plugin/plugin.json",
           "scripts/record",
           "Formula/record.rb"
         ],

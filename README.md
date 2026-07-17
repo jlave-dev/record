@@ -1,6 +1,6 @@
 # record
 
-Native macOS app capture and local transcription for humans and Codex.
+Native macOS app capture and local transcription for humans, Codex, and Claude Code.
 
 The installed product is one command with two runtime surfaces:
 
@@ -21,10 +21,10 @@ Install the latest release:
 
 ```bash
 brew install jlave-dev/tap/record
-record plugin install
 ```
 
 Homebrew installs the `record` command plus `ffmpeg` and `whisper-cpp`. The release contains a self-contained transcription executable and a signed `CaptureAgent.app`; users do not need Node.js, npm, Swift, or Xcode.
+Agent plugins are optional; see [Agent Plugins](#agent-plugins) to install the Codex or Claude Code integration.
 
 Requirements:
 
@@ -90,20 +90,29 @@ Defaults:
 
 The model download is written through a temporary file and verified by byte size and SHA-256 before installation.
 
-## Codex Plugin
+## Agent Plugins
 
-The marketplace lives at `.agents/plugins/marketplace.json`. The Homebrew release also carries a matching local marketplace so CLI and plugin versions cannot drift.
+The repository contains marketplaces for Codex at `.agents/plugins/marketplace.json` and Claude Code at `.claude-plugin/marketplace.json`. The Homebrew release carries matching local marketplaces.
 
-Install the bundled plugin with:
+The corresponding agent CLI must already be on `PATH`. Install one plugin:
+
+```bash
+record plugin install --codex
+record plugin install --claude
+```
+
+If both CLIs are installed, install both together:
 
 ```bash
 record plugin install
 ```
 
-Then start a new Codex task. The plugin exposes:
+Record remembers only successfully installed hosts. After a Homebrew upgrade, the first `capture`, `transcribe`, `doctor`, or `setup` command refreshes stale Record plugins automatically. A plugin removed through its agent CLI is not reinstalled.
 
-- `$capture`
-- `$transcribe`
+Then start a new Codex task or Claude Code session. Both plugins expose capture and transcribe skills:
+
+- Codex: `$capture` and `$transcribe`
+- Claude Code: `/record:capture` and `/record:transcribe`
 
 The skills are thin adapters around `record capture` and `record transcribe`.
 
@@ -115,6 +124,7 @@ Development requirements:
 - Bun for the self-contained transcription build.
 - Xcode Command Line Tools.
 - Homebrew with `ffmpeg` and `whisper-cpp` for live transcription tests.
+- Codex and Claude Code for full plugin validation.
 
 ```bash
 npm install
@@ -148,7 +158,7 @@ This creates `dist/release/record-<version>-macos-arm64.tar.gz`. Local archives 
 
 Releases from `main` use semantic-release and Conventional Commits to choose the next version. The macOS arm64 release job then:
 
-1. Updates the workspace, CLI, plugin, and Formula versions.
+1. Updates the workspace, CLI, both plugin manifests, and Formula versions.
 2. Signs CaptureAgent, capture, and transcribe with Developer ID and hardened runtime.
 3. Notarizes the assembled bundle and staples the CaptureAgent ticket.
 4. Builds the final archive and writes its SHA-256 to `Formula/record.rb`.

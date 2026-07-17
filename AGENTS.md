@@ -29,10 +29,6 @@ docs(record-plugin): document smoke validation
 
 Never include `codex` in branch names or commit messages.
 
-## Software Defaults
-
-Prefer TypeScript when creating new general-purpose software. When the software has special requirements, use the best tool for the job, even if that is a different language.
-
 ## Project Context
 
 This repository has native Swift capture and TypeScript transcription runtimes behind the Homebrew-distributed `record` CLI. The agent plugin source lives in `plugins/record`.
@@ -69,7 +65,8 @@ npm --workspace transcribe run transcribe -- <args>
 | --- | --- |
 | Capture CLI | `packages/capture/AGENTS.md` |
 | Transcribe CLI | `packages/transcribe/AGENTS.md` |
-| Agent plugin | `plugins/record/README.md` and the relevant skill `SKILL.md` |
+| Codex plugin | `plugins/record/README.md` and `plugins/record/skills/<skill>/SKILL.md` |
+| Claude plugin | `plugins/record/README.md` and `plugins/record/claude/skills/<skill>/SKILL.md` |
 
 ## Validation
 
@@ -84,7 +81,7 @@ npm --workspace transcribe run transcribe -- <args>
 - `packages/transcribe`: local transcription CLI.
 - `scripts/record`: unified installed CLI dispatcher.
 - `packaging/marketplace`: marketplace bundled with Homebrew releases.
-- `plugins/record`: local agent plugin manifests, skills, and helper scripts.
+- `plugins/record`: Codex plugin plus the nested Claude plugin, skills, and helper scripts.
 - `dist/`, `node_modules/`, `runs/`, recordings, transcripts, and local config are generated and must stay untracked.
 
 ## Boundaries

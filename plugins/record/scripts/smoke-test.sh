@@ -43,11 +43,13 @@ expect_failure_contains() {
   fi
 }
 
-[[ -f "$plugin_root/.codex-plugin/plugin.json" ]] || fail "missing plugin manifest"
+[[ -f "$plugin_root/.codex-plugin/plugin.json" ]] || fail "missing Codex plugin manifest"
+[[ -f "$plugin_root/claude/.claude-plugin/plugin.json" ]] || fail "missing Claude plugin manifest"
 [[ -x "$script_dir/run-capture.sh" ]] || fail "run-capture.sh is not executable"
 [[ -x "$script_dir/run-transcribe.sh" ]] || fail "run-transcribe.sh is not executable"
 
 python3 -m json.tool "$plugin_root/.codex-plugin/plugin.json" >/dev/null
+python3 -m json.tool "$plugin_root/claude/.claude-plugin/plugin.json" >/dev/null
 
 if [[ -f "$plugin_validator" ]]; then
   run python3 "$plugin_validator" "$plugin_root"
@@ -55,6 +57,10 @@ fi
 if [[ -f "$skill_validator" ]]; then
   run python3 "$skill_validator" "$plugin_root/skills/capture"
   run python3 "$skill_validator" "$plugin_root/skills/transcribe"
+fi
+if command -v claude >/dev/null 2>&1; then
+  run claude plugin validate --strict "$plugin_root/claude"
+  run claude plugin validate --strict "$(cd -- "$plugin_root/../.." && pwd)"
 fi
 
 tmp_dir="$(mktemp -d)"
