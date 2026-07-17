@@ -11,7 +11,7 @@
   "scripts": {
     "setup:capture": "npm --workspace capture run setup",
     "setup:transcribe": "npm --workspace transcribe run setup",
-    "setup": "npm run install:local && $HOME/.local/bin/record setup",
+    "setup": "npm run install:local && $HOME/.local/bin/record-dev setup",
     "build:bundle": "npm --workspaces run build",
     "build:binary:macos-arm64": "./scripts/build-release-macos-arm64.sh",
     "build:release:macos-arm64": "./scripts/build-release-macos-arm64.sh",

@@ -138,7 +138,7 @@ Install a development build locally:
 
 ```bash
 npm run install:local
-record doctor
+record-dev doctor
 ```
 
 Package-specific development remains available:
