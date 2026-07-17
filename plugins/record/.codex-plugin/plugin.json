@@ -1,6 +1,6 @@
 {
   "name": "record",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Adapter skills for the Homebrew-installed record CLI.",
   "author": {
     "name": "James Lave",
