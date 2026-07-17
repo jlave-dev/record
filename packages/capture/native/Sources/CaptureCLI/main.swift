@@ -35,7 +35,7 @@ struct CaptureCLI {
         case "help", "--help", "-h":
             printHelp()
         case "--version", "-V":
-            print("0.2.1")
+            print("0.3.0")
         default:
             throw CaptureCoreError.message("Unknown command \"\(command)\". Run capture --help.")
         }
