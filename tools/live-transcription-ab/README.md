@@ -1,30 +1,33 @@
-# Local Live-Transcription A/B Test
+# Local Live-Transcription Replay and A/B Test
 
-Compare Apple SpeechTranscriber with FluidAudio's Parakeet EOU model on a meeting recording without uploading the recording or transcript anywhere.
+Replay a prerecorded meeting at source speed through FluidAudio, emit timestamped transcript events, and optionally have Claude generate grounded context and questions while the meeting plays. On macOS 26, the same tool can also compare final FluidAudio output with Apple SpeechTranscriber.
 
-This is an engine-selection harness, not the finished live-capture feature. It measures final transcript output and processing speed from identical normalized audio. It does not claim to measure live end-of-utterance latency yet.
+This is a test harness, not live ScreenCaptureKit capture. It proves the transcription-to-feedback loop with prerecorded media before capture code changes.
 
 ## Privacy
 
-- The input media is read from its existing path and never copied into this repository.
-- ffmpeg creates normalized audio in a private temporary directory and the script deletes it on exit.
-- Transcripts and comparison results are written only to the output directory you choose.
-- The script makes no transcription API calls. Apple SpeechTranscriber runs on-device; FluidAudio runs its open-source Core ML model on-device.
-- First use may download an Apple language asset and the FluidAudio model. Those downloads contain no meeting data.
-- Do not put the output directory inside this checkout. Do not commit, push, paste, or upload its contents unless company policy explicitly allows it.
+- The input media is read in place and never modified.
+- ffmpeg writes normalized audio to a private temporary directory that is deleted on exit.
+- FluidAudio transcription runs locally with an open-source Core ML model.
+- Replay events and results are mode `600` in the output directory you choose.
+- First use downloads FluidAudio source and its model; no meeting audio is uploaded.
+- `--questions` sends the rolling committed transcript excerpt—not raw audio—to Anthropic through the installed Claude Code CLI. Use it only when company policy permits that text to leave the machine.
+- Never put private results in this checkout or commit, push, paste, or upload them.
 
 ## Requirements
 
-- Apple-silicon Mac.
-- macOS 26 or newer. Apple SpeechTranscriber is unavailable on older macOS releases.
-- Xcode 26 or newer: `xcodebuild -version`.
+FluidAudio replay:
+
+- Apple-silicon Mac with macOS 15 or newer.
+- Xcode 16 or newer: `xcodebuild -version`.
 - Homebrew ffmpeg: `brew install ffmpeg`.
-- Network access for the first build/model installation. Subsequent runs use cached source/models.
-- English meeting audio for this first comparison.
+- English audio.
+- Network access for the first build/model download.
+- Installed and authenticated Claude Code only when using `--questions`.
 
-No OpenAI, Anthropic, FluidAudio, or Hugging Face API key is used.
+Apple-vs-FluidAudio batch comparison additionally requires macOS 26 and Xcode 26. On an older SDK, the Apple executable builds as an actionable unsupported stub instead of failing on missing symbols.
 
-## Get the branch on the work laptop
+## Get the branch
 
 ```bash
 git clone --branch feat/live-transcription-ab --single-branch \
@@ -32,18 +35,81 @@ git clone --branch feat/live-transcription-ab --single-branch \
 cd record-live-ab
 ```
 
-If the repository already exists:
+For an existing checkout:
 
 ```bash
 git fetch origin
 git switch --track origin/feat/live-transcription-ab
 ```
 
-If you previously created that local branch, use `git switch feat/live-transcription-ab && git pull --ff-only` instead.
+If that local branch already exists, use `git switch feat/live-transcription-ab && git pull --ff-only`.
 
-## Run the comparison
+## Test private meeting audio locally
 
-Choose an output directory outside the repository:
+Start with a two-minute excerpt. Without `--questions`, everything remains local:
+
+```bash
+./tools/live-transcription-ab/run-ab.sh \
+  --fluid-replay \
+  --input "/absolute/path/to/meeting.mp4" \
+  --output "$HOME/record-live-results/meeting-opening" \
+  --start 0 \
+  --duration 120
+```
+
+The replay is timestamp-paced, so a two-minute excerpt takes about two minutes after model setup. Omit `--start` and `--duration` only when you intend to replay the complete meeting in real time.
+
+If transcript text is approved for Claude:
+
+```bash
+./tools/live-transcription-ab/run-ab.sh \
+  --fluid-replay \
+  --questions \
+  --input "/absolute/path/to/meeting.mp4" \
+  --output "$HOME/record-live-results/meeting-opening-with-questions" \
+  --start 0 \
+  --duration 120
+```
+
+FluidAudio's repeated EOU behavior is not reliable enough by itself in the pinned version. The harness therefore commits an utterance when the engine reports EOU, when a partial remains stable for 1.5 seconds, or after 15 seconds of continuous speech. Every final event records the reason. These calibration values can be changed with `--stable-partial-ms` and `--max-utterance-ms`.
+
+## Replay results
+
+The private output directory contains:
+
+- `events.jsonl`: ordered `transcript.partial` and `transcript.final` events.
+- `replay-summary.json`: first partial/final timing and P50/P95/max delivery latency.
+- `fluid.json`: final replay transcript and engine metadata.
+- `questions.jsonl`: optional timestamped Claude context/questions with transcript evidence cursors and generation latency.
+
+Inspect locally:
+
+```bash
+python3 -m json.tool "$HOME/record-live-results/meeting-opening/replay-summary.json"
+jq . "$HOME/record-live-results/meeting-opening-with-questions/questions.jsonl"
+```
+
+## Reproduce with the public meeting fixture
+
+The development proof used GitLab's public 42-minute product-marketing meeting:
+
+```bash
+brew install yt-dlp
+yt-dlp -f 18 \
+  -o "$HOME/Downloads/product-marketing-meeting.%(ext)s" \
+  "https://www.youtube.com/watch?v=lBVtvOpU80Q"
+
+./tools/live-transcription-ab/run-ab.sh \
+  --fluid-replay \
+  --questions \
+  --input "$HOME/Downloads/product-marketing-meeting.mp4" \
+  --output "$HOME/record-live-results/public-opening" \
+  --duration 120
+```
+
+## Run the macOS 26 A/B comparison
+
+Choose an empty output directory outside the repository:
 
 ```bash
 ./tools/live-transcription-ab/run-ab.sh \
@@ -51,13 +117,7 @@ Choose an output directory outside the repository:
   --output "$HOME/record-ab-results/meeting-1"
 ```
 
-The output directory must be empty. Source media is never moved or modified.
-
-The first run takes longer because Swift resolves/builds FluidAudio, Apple may install its English speech asset, and FluidAudio downloads the Parakeet EOU model. Neither engine receives the meeting over the network.
-
-## Add accuracy scores
-
-A side-by-side diff shows disagreement but cannot determine which engine is correct. If the meeting platform already produced a transcript, save a corrected excerpt locally and pass it as the reference:
+To calculate directional word error rates, add a locally corrected reference:
 
 ```bash
 ./tools/live-transcription-ab/run-ab.sh \
@@ -66,43 +126,30 @@ A side-by-side diff shows disagreement but cannot determine which engine is corr
   --output "$HOME/record-ab-results/meeting-1-with-reference"
 ```
 
-The summary will include word error rate for each engine. A lower value is better.
-
-## Results
-
-The private output directory contains:
-
-- `apple.txt`: Apple final transcript.
-- `fluid.txt`: FluidAudio final transcript.
-- `apple-vs-fluid.diff`: direct output difference.
-- `summary.json`: processing time, realtime factor, word counts, and optional WER.
-- `apple.json` and `fluid.json`: engine metadata and detailed local results.
-
-Inspect locally:
-
-```bash
-open "$HOME/record-ab-results/meeting-1"
-python3 -m json.tool "$HOME/record-ab-results/meeting-1/summary.json"
-```
-
-If company policy prevents sharing transcripts or derived metrics, do not send anything back. You can make the selection on the work laptop using transcript accuracy, WER, and processing speed.
+The A/B directory contains `apple.txt`, `fluid.txt`, their diff, engine JSON, and `summary.json`. Lower WER is better.
 
 ## Clean up
 
-Delete only the explicit result directory after reviewing it:
+Delete only the explicit result directory after review:
 
 ```bash
-rm -r "$HOME/record-ab-results/meeting-1"
+rm -r "$HOME/record-live-results/meeting-opening"
 ```
 
-FluidAudio models remain in the user's Application Support cache for later runs. The Apple speech asset is managed by macOS.
+FluidAudio models remain under the user's Application Support cache. Apple speech assets are managed by macOS.
 
-## Validate the harness
+## Validate
 
 These checks use no meeting data:
 
 ```bash
 python3 -m unittest discover -s tools/live-transcription-ab/tests -v
 bash -n tools/live-transcription-ab/run-ab.sh
+swift build --package-path tools/live-transcription-ab -c release --product fluid-transcribe
+```
+
+On macOS 26/Xcode 26, also run:
+
+```bash
 swift build --package-path tools/live-transcription-ab -c release
 ```

@@ -4,6 +4,7 @@ import CoreMedia
 import Foundation
 import Speech
 
+#if compiler(>=6.2)
 @main
 struct AppleTranscribe {
     static func main() async {
@@ -84,3 +85,12 @@ struct AppleTranscribe {
         return Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
 }
+#else
+@main
+struct AppleTranscribeUnsupported {
+    static func main() {
+        FileHandle.standardError.write(Data("Apple SpeechTranscriber requires Xcode 26 or newer\n".utf8))
+        exit(2)
+    }
+}
+#endif

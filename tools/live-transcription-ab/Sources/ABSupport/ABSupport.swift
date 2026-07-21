@@ -53,11 +53,17 @@ public struct CLIOptions: Sendable {
     public let input: URL
     public let output: URL
     public let locale: Locale
+    public let replayEvents: URL?
+    public let stablePartialMs: Int
+    public let maxUtteranceMs: Int
 
     public static func parse(_ arguments: [String]) throws -> CLIOptions {
         var input: String?
         var output: String?
         var locale = "en-US"
+        var replayEvents: String?
+        var stablePartialMs = 1500
+        var maxUtteranceMs = 15_000
         var index = 0
 
         while index < arguments.count {
@@ -74,8 +80,27 @@ public struct CLIOptions: Sendable {
                 index += 1
                 guard index < arguments.count else { throw CLIError("--locale requires an identifier") }
                 locale = arguments[index]
+            case "--replay-events":
+                index += 1
+                guard index < arguments.count else { throw CLIError("--replay-events requires a path") }
+                replayEvents = arguments[index]
+            case "--stable-partial-ms":
+                index += 1
+                guard index < arguments.count, let value = Int(arguments[index]), value > 0 else {
+                    throw CLIError("--stable-partial-ms requires a positive integer")
+                }
+                stablePartialMs = value
+            case "--max-utterance-ms":
+                index += 1
+                guard index < arguments.count, let value = Int(arguments[index]), value > 0 else {
+                    throw CLIError("--max-utterance-ms requires a positive integer")
+                }
+                maxUtteranceMs = value
             case "-h", "--help":
-                throw CLIError("usage: ENGINE --input canonical.wav --output result.json [--locale en-US]", exitCode: 0)
+                throw CLIError(
+                    "usage: ENGINE --input canonical.wav --output result.json [--locale en-US] [--replay-events events.jsonl] [--stable-partial-ms 1500] [--max-utterance-ms 15000]",
+                    exitCode: 0
+                )
             default:
                 throw CLIError("unknown argument: \(arguments[index])")
             }
@@ -83,7 +108,9 @@ public struct CLIOptions: Sendable {
         }
 
         guard let input, let output else {
-            throw CLIError("usage: ENGINE --input canonical.wav --output result.json [--locale en-US]")
+            throw CLIError(
+                "usage: ENGINE --input canonical.wav --output result.json [--locale en-US] [--replay-events events.jsonl] [--stable-partial-ms 1500] [--max-utterance-ms 15000]"
+            )
         }
 
         let inputURL = URL(fileURLWithPath: input).standardizedFileURL
@@ -94,7 +121,10 @@ public struct CLIOptions: Sendable {
         return CLIOptions(
             input: inputURL,
             output: URL(fileURLWithPath: output).standardizedFileURL,
-            locale: Locale(identifier: locale)
+            locale: Locale(identifier: locale),
+            replayEvents: replayEvents.map { URL(fileURLWithPath: $0).standardizedFileURL },
+            stablePartialMs: stablePartialMs,
+            maxUtteranceMs: maxUtteranceMs
         )
     }
 }
