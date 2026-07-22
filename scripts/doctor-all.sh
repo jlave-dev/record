@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set +e
 
-if [[ ! -x packages/capture/dist/capture || ! -x packages/transcribe/dist/index.js ]]; then
+if [[ ! -x packages/capture/dist/capture || ! -x packages/transcribe/dist/index.js || ! -x packages/live/dist/live ]]; then
   npm run build:bundle
 fi
 
@@ -11,7 +11,10 @@ capture_status=$?
 node packages/transcribe/dist/index.js doctor
 transcribe_status=$?
 
-if [[ "$capture_status" -ne 0 || "$transcribe_status" -ne 0 ]]; then
+packages/live/dist/live doctor
+live_status=$?
+
+if [[ "$capture_status" -ne 0 || "$transcribe_status" -ne 0 || "$live_status" -ne 0 ]]; then
   exit 1
 fi
 

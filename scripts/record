@@ -19,6 +19,7 @@ Usage: record <command> [options]
 
   record capture <capture-command> [options]
   record transcribe [transcribe-options]
+  record live <start|status|next|stop|setup|doctor> [options]
   record doctor
   record setup
   record plugin install [--codex|--claude]
@@ -39,10 +40,13 @@ run_doctor() {
   local exit_code=0
   require_executable "$runtime_dir/capture/capture" "capture"
   require_executable "$runtime_dir/transcribe" "transcribe"
+  require_executable "$runtime_dir/live/live" "live"
   echo "==> capture"
   "$runtime_dir/capture/capture" doctor || exit_code=1
   echo "==> transcribe"
   "$runtime_dir/transcribe" doctor || exit_code=1
+  echo "==> live"
+  "$runtime_dir/live/live" doctor || exit_code=1
   return "$exit_code"
 }
 
@@ -50,7 +54,9 @@ run_setup() {
   local exit_code=0
   require_executable "$runtime_dir/capture/capture" "capture"
   require_executable "$runtime_dir/transcribe" "transcribe"
+  require_executable "$runtime_dir/live/live" "live"
   "$runtime_dir/transcribe" setup || exit_code=1
+  "$runtime_dir/live/live" setup || exit_code=1
   "$runtime_dir/capture/capture" setup || exit_code=1
   return "$exit_code"
 }
@@ -197,6 +203,11 @@ case "$command_name" in
     refresh_installed_plugins
     require_executable "$runtime_dir/transcribe" "transcribe"
     exec "$runtime_dir/transcribe" "$@"
+    ;;
+  live)
+    refresh_installed_plugins
+    require_executable "$runtime_dir/live/live" "live"
+    exec "$runtime_dir/live/live" "$@"
     ;;
   doctor)
     [[ $# -eq 0 ]] || { echo "record doctor does not accept arguments; use record capture doctor --json or record transcribe doctor --json." >&2; exit 2; }

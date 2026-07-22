@@ -2,15 +2,16 @@
 
 Native macOS app capture and local transcription for humans, Codex, and Claude Code.
 
-The installed product is one command with two runtime surfaces:
+The installed product is one command with three runtime surfaces:
 
 ```bash
 record capture start --app chrome
 record capture stop
 record transcribe --input /path/to/recording.mp4 --output /path/to/transcript
+record live start --app zoom
 ```
 
-Capture uses ScreenCaptureKit and application audio. Transcription uses local whisper.cpp. Recordings, source media, transcripts, metadata, configuration, and runtime state stay on the local machine by default.
+Capture uses ScreenCaptureKit and application audio. Batch transcription uses local whisper.cpp. Live transcription uses the open-source FluidAudio runtime and local models. Recordings, source media, transcripts, metadata, configuration, and runtime state stay on the local machine by default.
 
 > [!IMPORTANT]
 > You are responsible for making sure each recording is legal and allowed by applicable consent laws and workplace, school, client, meeting, and platform policies.
@@ -43,6 +44,12 @@ The first transcription downloads and verifies the default model:
 
 ```bash
 record transcribe setup
+```
+
+Live start prepares its local model automatically. To download it before a meeting:
+
+```bash
+record live setup
 ```
 
 ## Capture
@@ -90,6 +97,22 @@ Defaults:
 
 The model download is written through a temporary file and verified by byte size and SHA-256 before installation.
 
+## Live transcription
+
+```bash
+record live setup
+record live start --app zoom --json
+record live next --after 0 --timeout 20 --json
+record live status --json
+record live stop --json
+```
+
+`start` records the selected app normally while a separate worker receives 16 kHz mono application-audio frames. It emits local JSONL events at `live-transcript.jsonl`; committed transcript events include an ordered cursor, source-audio timestamp, delivery latency, and commit reason. Native end-of-utterance is used when available, with stable-partial and maximum-utterance fallbacks so continuous meeting audio cannot stall the stream.
+
+On first use, `start` checks Screen & System Audio Recording permission, opens the macOS permission flow when needed, and prepares the approximately 430 MB live model with visible progress. `record live setup` is only needed to pre-warm that download. `record live doctor` is read-only and reports an actionable setup error when the model is absent or invalid.
+
+`next` returns committed events only. Pass its `next_cursor` into the following call. This cursor contract lets either agent plugin maintain rolling context and surface questions without sending unstable partial hypotheses to the model. Microphone capture and speaker diarization are not included in this first release.
+
 ## Agent Plugins
 
 The repository contains marketplaces for Codex at `.agents/plugins/marketplace.json` and Claude Code at `.claude-plugin/marketplace.json`. The Homebrew release carries matching local marketplaces.
@@ -107,14 +130,14 @@ If both CLIs are installed, install both together:
 record plugin install
 ```
 
-Record remembers only successfully installed hosts. After a Homebrew upgrade, the first `capture`, `transcribe`, `doctor`, or `setup` command refreshes stale Record plugins automatically. A plugin removed through its agent CLI is not reinstalled.
+Record remembers only successfully installed hosts. After a Homebrew upgrade, the first `capture`, `transcribe`, `live`, `doctor`, or `setup` command refreshes stale Record plugins automatically. A plugin removed through its agent CLI is not reinstalled.
 
-Then start a new Codex task or Claude Code session. Both plugins expose capture and transcribe skills:
+Then start a new Codex task or Claude Code session. Both plugins expose the same three skills:
 
-- Codex: `$capture` and `$transcribe`
-- Claude Code: `/record:capture` and `/record:transcribe`
+- Codex: `$capture`, `$transcribe`, and `$live`
+- Claude Code: `/record:capture`, `/record:transcribe`, and `/record:live`
 
-The skills are thin adapters around `record capture` and `record transcribe`.
+The live skills poll the same cursor API and require timestamp grounding, final-only evidence, semantic debouncing, and local-artifact privacy. Codex CLI is the semantic E2E test provider; Claude Code is covered by strict plugin validation and the shared adapter contract test.
 
 ## Development
 
@@ -146,6 +169,8 @@ Package-specific development remains available:
 ```bash
 npm --workspace capture run capture -- --help
 npm --workspace transcribe run transcribe -- --help
+npm --workspace live run build
+npm --workspace live run test:prerecorded -- /path/to/meeting.mp4 30
 ```
 
 ## Release
@@ -159,7 +184,7 @@ This creates `dist/release/record-<version>-macos-arm64.tar.gz`. Local archives 
 Releases from `main` use semantic-release and Conventional Commits to choose the next version. The macOS arm64 release job then:
 
 1. Updates the workspace, CLI, both plugin manifests, and Formula versions.
-2. Signs CaptureAgent, capture, and transcribe with Developer ID and hardened runtime.
+2. Signs CaptureAgent, capture, transcribe, live, and live-worker with Developer ID and hardened runtime.
 3. Notarizes the assembled bundle and staples the CaptureAgent ticket.
 4. Builds the final archive and writes its SHA-256 to `Formula/record.rb`.
 5. Commits the generated versions and Formula checksum with `[skip ci]`.

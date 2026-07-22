@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -36,11 +37,15 @@ async function replace(relativePath, pattern, replacement) {
 }
 
 async function checkVersion(expectedVersion) {
+  const workflow = await readFile(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
+  assert.match(workflow, /conventional-changelog-conventionalcommits@9\.3\.1/);
+
   const checks = [];
   for (const relativePath of [
     "package.json",
     "packages/capture/package.json",
     "packages/transcribe/package.json",
+    "packages/live/package.json",
     "plugins/record/.codex-plugin/plugin.json",
     "plugins/record/claude/.claude-plugin/plugin.json",
   ]) {
@@ -53,6 +58,7 @@ async function checkVersion(expectedVersion) {
     ["package-lock.json workspace root", packageLock.packages[""].version],
     ["package-lock.json capture workspace", packageLock.packages["packages/capture"].version],
     ["package-lock.json transcribe workspace", packageLock.packages["packages/transcribe"].version],
+    ["package-lock.json live workspace", packageLock.packages["packages/live"].version],
   );
 
   const textChecks = [
@@ -63,6 +69,7 @@ async function checkVersion(expectedVersion) {
       /case "--version", "-V":\s+print\("([^"]+)"\)/m,
     ],
     ["packages/transcribe/src/index.ts", "packages/transcribe/src/index.ts", /\.version\("([^"]+)"\)/],
+    ["packages/live/native/Sources/LiveCLI/main.swift", "packages/live/native/Sources/LiveCLI/main.swift", /case "--version", "-V":\s+print\("([^"]+)"\)/m],
     ["Formula/record.rb", "Formula/record.rb", /^  version "([^"]+)"/m],
     ["Formula/record.rb release URL", "Formula/record.rb", /releases\/download\/v([^/]+)\//],
   ];
@@ -84,6 +91,7 @@ async function updateVersion(version) {
     "package.json",
     "packages/capture/package.json",
     "packages/transcribe/package.json",
+    "packages/live/package.json",
     "plugins/record/.codex-plugin/plugin.json",
     "plugins/record/claude/.claude-plugin/plugin.json",
   ]) {
@@ -97,6 +105,7 @@ async function updateVersion(version) {
   packageLock.packages[""].version = version;
   packageLock.packages["packages/capture"].version = version;
   packageLock.packages["packages/transcribe"].version = version;
+  packageLock.packages["packages/live"].version = version;
   await writeJson("package-lock.json", packageLock);
 
   await replace("scripts/record", /^version="[^"]+"/m, `version="${version}"`);
@@ -106,6 +115,11 @@ async function updateVersion(version) {
     `$1${version}$2`,
   );
   await replace("packages/transcribe/src/index.ts", /\.version\("[^"]+"\)/, `.version("${version}")`);
+  await replace(
+    "packages/live/native/Sources/LiveCLI/main.swift",
+    /(case "--version", "-V":\s+print\(")[^"]+("\))/m,
+    `$1${version}$2`,
+  );
   await replace(
     "Formula/record.rb",
     /releases\/download\/v[^/]+\/record-[^/]+-macos-arm64\.tar\.gz/,

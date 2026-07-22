@@ -21,6 +21,7 @@ run_record() {
 mkdir -p \
   "$prefix/bin" \
   "$prefix/libexec/record/capture" \
+  "$prefix/libexec/record/live" \
   "$prefix/share/record/marketplace/.agents/plugins" \
   "$prefix/share/record/marketplace/.claude-plugin"
 cp "$repo_root/scripts/record" "$prefix/bin/record"
@@ -33,6 +34,10 @@ SH
 cat > "$prefix/libexec/record/transcribe" <<SH
 #!/usr/bin/env bash
 echo "transcribe \$*" >> "$log"
+SH
+cat > "$prefix/libexec/record/live/live" <<SH
+#!/usr/bin/env bash
+echo "live \$*" >> "$log"
 SH
 cat > "$tmp_dir/codex" <<SH
 #!/usr/bin/env bash
@@ -58,17 +63,19 @@ elif [[ "\$*" == "plugin list --json" ]]; then
   fi
 fi
 SH
-chmod +x "$prefix/libexec/record/capture/capture" "$prefix/libexec/record/transcribe" "$tmp_dir/codex" "$tmp_dir/claude"
+chmod +x "$prefix/libexec/record/capture/capture" "$prefix/libexec/record/transcribe" "$prefix/libexec/record/live/live" "$tmp_dir/codex" "$tmp_dir/claude"
 printf '{"name":"record-cli","plugins":[]}\n' > "$prefix/share/record/marketplace/.agents/plugins/marketplace.json"
 printf '{"name":"record-cli","plugins":[]}\n' > "$prefix/share/record/marketplace/.claude-plugin/marketplace.json"
 
 [[ "$("$prefix/bin/record" --version)" == "$version" ]]
 run_record capture status --json
 run_record transcribe doctor --json
+run_record live next --after 0 --json
 run_record plugin install >/dev/null
 
 grep -qx 'capture status --json' "$log"
 grep -qx 'transcribe doctor --json' "$log"
+grep -qx 'live next --after 0 --json' "$log"
 grep -qx "codex plugin marketplace add $tmp_dir/plugin-marketplace --json" "$log"
 grep -qx 'codex plugin add record@record-cli --json' "$log"
 grep -qx 'claude plugin marketplace list --json' "$log"

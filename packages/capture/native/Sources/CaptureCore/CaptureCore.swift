@@ -21,6 +21,13 @@ public enum CaptureStatus: String, Codable {
     }
 }
 
+public enum LiveCaptureStatus: String, Codable {
+    case starting
+    case running
+    case stopped
+    case failed
+}
+
 public struct CaptureRequest: Codable {
     public let action: CaptureAction
     public let token: String
@@ -29,8 +36,10 @@ public struct CaptureRequest: Codable {
     public let width: Int?
     public let height: Int?
     public let responsePath: String?
+    public let liveWorkerPath: String?
+    public let liveEventsPath: String?
 
-    public init(action: CaptureAction, token: String, app: String? = nil, outputDir: String? = nil, width: Int? = nil, height: Int? = nil, responsePath: String? = nil) {
+    public init(action: CaptureAction, token: String, app: String? = nil, outputDir: String? = nil, width: Int? = nil, height: Int? = nil, responsePath: String? = nil, liveWorkerPath: String? = nil, liveEventsPath: String? = nil) {
         self.action = action
         self.token = token
         self.app = app
@@ -38,11 +47,13 @@ public struct CaptureRequest: Codable {
         self.width = width
         self.height = height
         self.responsePath = responsePath
+        self.liveWorkerPath = liveWorkerPath
+        self.liveEventsPath = liveEventsPath
     }
 }
 
 public struct CaptureState: Codable {
-    public var schemaVersion = 2
+    public var schemaVersion = 3
     public let token: String
     public var status: CaptureStatus
     public var pid: Int32?
@@ -57,6 +68,12 @@ public struct CaptureState: Codable {
     public var startedAt: String?
     public var stoppedAt: String?
     public var error: String?
+    public var liveEventsPath: String?
+    public var liveWorkerPID: Int32?
+    public var liveStatus: LiveCaptureStatus?
+    public var liveFramesDelivered: Int?
+    public var liveFramesDropped: Int?
+    public var liveError: String?
 
     public init(token: String, status: CaptureStatus, requestedApp: String, outputDir: String, outputPath: String, metadataPath: String) {
         self.token = token
@@ -69,7 +86,7 @@ public struct CaptureState: Codable {
 }
 
 public struct CaptureMetadata: Encodable {
-    public let schemaVersion = 2
+    public let schemaVersion = 3
     public let artifactType = "capture_recording"
     public let appName: String
     public let bundleID: String
@@ -82,8 +99,12 @@ public struct CaptureMetadata: Encodable {
     public let capturesApplicationAudio = true
     public let startedAt: String
     public let stoppedAt: String
+    public let liveEventsPath: String?
+    public let liveFramesDelivered: Int?
+    public let liveFramesDropped: Int?
+    public let liveError: String?
 
-    public init(appName: String, bundleID: String, outputPath: String, metadataPath: String, width: Int, height: Int, startedAt: String, stoppedAt: String) {
+    public init(appName: String, bundleID: String, outputPath: String, metadataPath: String, width: Int, height: Int, startedAt: String, stoppedAt: String, liveEventsPath: String? = nil, liveFramesDelivered: Int? = nil, liveFramesDropped: Int? = nil, liveError: String? = nil) {
         self.appName = appName
         self.bundleID = bundleID
         self.outputPath = outputPath
@@ -92,6 +113,10 @@ public struct CaptureMetadata: Encodable {
         self.height = height
         self.startedAt = startedAt
         self.stoppedAt = stoppedAt
+        self.liveEventsPath = liveEventsPath
+        self.liveFramesDelivered = liveFramesDelivered
+        self.liveFramesDropped = liveFramesDropped
+        self.liveError = liveError
     }
 }
 

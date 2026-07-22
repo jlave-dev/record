@@ -18,6 +18,18 @@ class Record < Formula
     prefix.install Dir["*"]
   end
 
+  def caveats
+    <<~EOS
+      First live use requests Screen & System Audio Recording permission and
+      prepares an approximately 430 MB local model automatically:
+        record live start --app zoom
+
+      Optional agent adapters:
+        record plugin install --codex
+        record plugin install --claude
+    EOS
+  end
+
   test do
     assert_equal version.to_s, shell_output("#{bin}/record --version").strip
     assert_match "record plugin install", shell_output("#{bin}/record --help")

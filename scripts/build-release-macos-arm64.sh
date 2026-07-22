@@ -11,8 +11,11 @@ codesign_keychain="${CAPTURE_CODESIGN_KEYCHAIN:-}"
 
 npm --prefix "$repo_root" --workspace capture run build
 npm --prefix "$repo_root" --workspace transcribe run build:binary:macos-arm64
+npm --prefix "$repo_root" --workspace live run build
 
 transcribe_binary="$repo_root/packages/transcribe/dist/binary/transcribe-macos-arm64"
+live_cli="$repo_root/packages/live/dist/live"
+live_worker="$repo_root/packages/live/dist/live-worker"
 if [[ -n "$codesign_identity" ]]; then
   transcribe_codesign_args=(
     --force
@@ -25,12 +28,14 @@ if [[ -n "$codesign_identity" ]]; then
     transcribe_codesign_args+=(--keychain "$codesign_keychain")
   fi
   codesign "${transcribe_codesign_args[@]}" "$transcribe_binary"
+  codesign "${transcribe_codesign_args[@]}" "$live_cli"
+  codesign "${transcribe_codesign_args[@]}" "$live_worker"
 fi
 
 capture_app="$repo_root/packages/capture/dist/CaptureAgent.app"
 capture_cli="$repo_root/packages/capture/dist/capture"
 developer_id_signed=1
-for signed_path in "$capture_app" "$capture_cli" "$transcribe_binary"; do
+for signed_path in "$capture_app" "$capture_cli" "$transcribe_binary" "$live_cli" "$live_worker"; do
   if ! codesign -dv --verbose=4 "$signed_path" 2>&1 | grep -F "Authority=Developer ID Application" >/dev/null; then
     developer_id_signed=0
   fi
@@ -38,7 +43,7 @@ done
 
 if [[ "$developer_id_signed" != "1" ]]; then
   if [[ "${RECORD_REQUIRE_DEVELOPER_ID:-0}" == "1" ]]; then
-    echo "Release requires Developer ID Application signatures for CaptureAgent, capture, and transcribe." >&2
+    echo "Release requires Developer ID Application signatures for CaptureAgent, capture, transcribe, live, and live-worker." >&2
     exit 1
   fi
   echo "Warning: release executables are not all Developer ID-signed; this archive is suitable for local testing only." >&2
@@ -48,15 +53,17 @@ rm -rf "$bundle_dir"
 mkdir -p \
   "$bundle_dir/bin" \
   "$bundle_dir/libexec/record/capture" \
+  "$bundle_dir/libexec/record/live" \
   "$bundle_dir/share/record/marketplace/plugins"
 
 cp "$repo_root/scripts/record" "$bundle_dir/bin/record"
 cp "$capture_cli" "$bundle_dir/libexec/record/capture/capture"
 ditto "$capture_app" "$bundle_dir/libexec/record/capture/CaptureAgent.app"
 cp "$transcribe_binary" "$bundle_dir/libexec/record/transcribe"
+cp "$live_cli" "$live_worker" "$bundle_dir/libexec/record/live/"
 ditto "$repo_root/packaging/marketplace" "$bundle_dir/share/record/marketplace"
 ditto "$repo_root/plugins/record" "$bundle_dir/share/record/marketplace/plugins/record"
-chmod +x "$bundle_dir/bin/record" "$bundle_dir/libexec/record/capture/capture" "$bundle_dir/libexec/record/transcribe"
+chmod +x "$bundle_dir/bin/record" "$bundle_dir/libexec/record/capture/capture" "$bundle_dir/libexec/record/transcribe" "$bundle_dir/libexec/record/live/live" "$bundle_dir/libexec/record/live/live-worker"
 
 if [[ "${RECORD_NOTARIZE:-0}" == "1" ]]; then
   "$repo_root/scripts/notarize-release-bundle.sh" "$bundle_dir"

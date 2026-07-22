@@ -3,12 +3,12 @@
   "owner": {
     "name": "James Lave"
   },
-  "description": "Claude Code skills for local Mac app capture and media transcription with record.",
+  "description": "Claude Code skills for local Mac app capture, media transcription, and live meeting feedback with record.",
   "plugins": [
     {
       "name": "record",
       "source": "./plugins/record/claude",
-      "description": "Capture Mac apps and transcribe local media with the Homebrew-installed record CLI",
+      "description": "Capture Mac apps, transcribe local media, and follow meetings live with the Homebrew-installed record CLI",
       "category": "productivity"
     }
   ]

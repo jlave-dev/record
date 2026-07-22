@@ -6,11 +6,13 @@
   "type": "module",
   "workspaces": [
     "packages/capture",
-    "packages/transcribe"
+    "packages/transcribe",
+    "packages/live"
   ],
   "scripts": {
     "setup:capture": "npm --workspace capture run setup",
     "setup:transcribe": "npm --workspace transcribe run setup",
+    "setup:live": "npm --workspace live run build && packages/live/dist/live setup",
     "setup": "npm run install:local && $HOME/.local/bin/record-dev setup",
     "build:bundle": "npm --workspaces run build",
     "build:binary:macos-arm64": "./scripts/build-release-macos-arm64.sh",
