@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -36,6 +37,9 @@ async function replace(relativePath, pattern, replacement) {
 }
 
 async function checkVersion(expectedVersion) {
+  const workflow = await readFile(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
+  assert.match(workflow, /conventional-changelog-conventionalcommits@9\.3\.1/);
+
   const checks = [];
   for (const relativePath of [
     "package.json",
