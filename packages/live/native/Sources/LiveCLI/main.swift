@@ -33,14 +33,17 @@ struct LiveCLI {
         let output = takeOption("--output", from: &arguments) ?? defaultOutputDirectory(app: app)
         guard arguments.isEmpty else { throw LiveError("unknown live start argument: \(arguments[0])") }
 
+        let capture = captureExecutable()
         let worker = try workerExecutable()
+        try ensureCapturePermission(capture)
+        try ensureWorkerReady(worker)
         let events = URL(fileURLWithPath: output).appendingPathComponent("live-transcript.jsonl").path
         var captureArguments = [
             "start", "--app", app, "--output", output,
             "--live-worker", worker.path, "--live-events", events,
         ]
         if json { captureArguments.append("--json") }
-        try runAndForward(captureExecutable(), captureArguments)
+        try runAndForward(capture, captureArguments)
     }
 
     private static func passthroughCapture(command: String, arguments: [String]) throws {
@@ -102,6 +105,24 @@ struct LiveCLI {
         _ = takeFlag("--json", from: &arguments)
         guard arguments.isEmpty else { throw LiveError("live \(command) does not accept that argument") }
         try runAndForward(try workerExecutable(), [command])
+        printJSON(["ok": true])
+    }
+
+    private static func ensureCapturePermission(_ capture: URL) throws {
+        guard FileManager.default.isExecutableFile(atPath: capture.path) else {
+            throw LiveError("capture runtime was not found at \(capture.path)")
+        }
+        guard run(capture, ["doctor", "--json"]).status != 0 else { return }
+        FileHandle.standardError.write(Data("Screen & System Audio Recording permission is required. Approve the macOS prompt; if System Settings opens, enable CaptureAgent and rerun this command.\n".utf8))
+        let setup = run(capture, ["setup", "--json"])
+        guard setup.status == 0, run(capture, ["doctor", "--json"]).status == 0 else {
+            throw LiveError("CaptureAgent permission is still disabled. Enable it in System Settings > Privacy & Security > Screen & System Audio Recording, then retry.")
+        }
+    }
+
+    private static func ensureWorkerReady(_ worker: URL) throws {
+        guard run(worker, ["doctor"]).status != 0 else { return }
+        try runAndForward(worker, ["setup"])
     }
 
     private static func captureState() throws -> CaptureStatePayload {
@@ -134,10 +155,14 @@ struct LiveCLI {
     }
 
     private static func runAndForward(_ executable: URL, _ arguments: [String]) throws {
-        let result = run(executable, arguments)
-        FileHandle.standardOutput.write(result.stdoutData)
-        if !result.stderr.isEmpty { FileHandle.standardError.write(Data(result.stderr.utf8)) }
-        guard result.status == 0 else { throw LiveError("live command failed") }
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.standardOutput = FileHandle.standardOutput
+        process.standardError = FileHandle.standardError
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw LiveError("live command failed") }
     }
 
     private static func run(_ executable: URL, _ arguments: [String]) -> ProcessResult {

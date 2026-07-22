@@ -12,10 +12,19 @@ struct LiveWorker {
             switch command {
             case "stream":
                 try await stream(arguments)
-            case "setup", "doctor":
+            case "setup":
                 let manager = StreamingEouAsrManager(chunkSize: .ms320, eouDebounceMs: 1280)
-                try await manager.loadModels()
-                print("{\"ok\":true}")
+                let progress = SetupProgress()
+                progress.write("Preparing live transcription model (about 430 MB on first use)...")
+                try await manager.loadModels(to: nil, configuration: nil) { update in
+                    progress.report(update)
+                }
+                progress.write("Live transcription is ready.")
+            case "doctor":
+                let directory = liveModelDirectory()
+                guard liveModelsAreReady(in: directory) else {
+                    throw LiveError("live model is not installed; run `record live setup`")
+                }
             case "help", "--help", "-h":
                 printHelp()
             default:
@@ -132,6 +141,29 @@ struct LiveWorker {
           live-worker setup
           live-worker doctor
         """)
+    }
+}
+
+private final class SetupProgress: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastStep = -1
+
+    func report(_ progress: DownloadProgress) {
+        let step = min(10, max(0, Int(progress.fractionCompleted * 10)))
+        lock.withLock {
+            guard step > lastStep else { return }
+            lastStep = step
+            let action = switch progress.phase {
+            case .listing: "Finding model files"
+            case .downloading: "Downloading live model"
+            case .compiling: "Preparing live model"
+            }
+            write("\(action)... \(step * 10)%")
+        }
+    }
+
+    func write(_ message: String) {
+        FileHandle.standardError.write(Data("\(message)\n".utf8))
     }
 }
 

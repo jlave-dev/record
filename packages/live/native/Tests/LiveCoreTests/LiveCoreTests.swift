@@ -3,6 +3,21 @@ import LiveCore
 import XCTest
 
 final class LiveCoreTests: XCTestCase {
+    func testLiveModelReadinessRequiresEveryFile() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        for path in liveModelRelativePaths.dropLast() {
+            let url = directory.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: url.path, contents: Data())
+        }
+        XCTAssertFalse(liveModelsAreReady(in: directory))
+        FileManager.default.createFile(atPath: directory.appendingPathComponent(liveModelRelativePaths.last!).path, contents: Data())
+        XCTAssertTrue(liveModelsAreReady(in: directory))
+    }
+
     func testFrameRoundTripAndTruncation() throws {
         let frame = AudioFrame(sourceAudioMs: 640, samples: [0.25, -0.5, 1])
         let pipe = Pipe()

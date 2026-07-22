@@ -1,5 +1,23 @@
 import Foundation
 
+public let liveModelRelativePaths = [
+    "streaming_encoder.mlmodelc/coremldata.bin",
+    "decoder.mlmodelc/coremldata.bin",
+    "joint_decision.mlmodelc/coremldata.bin",
+    "vocab.json",
+]
+
+public func liveModelDirectory() -> URL {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        .appendingPathComponent("FluidAudio/Models/parakeet-eou-streaming/parakeet-eou-streaming/320ms", isDirectory: true)
+}
+
+public func liveModelsAreReady(in directory: URL) -> Bool {
+    liveModelRelativePaths.allSatisfy {
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+    }
+}
+
 public struct AudioFrame: Sendable, Equatable {
     public static let magic: UInt32 = 0x524C4956
     public static let version: UInt32 = 1

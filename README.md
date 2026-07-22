@@ -46,7 +46,7 @@ The first transcription downloads and verifies the default model:
 record transcribe setup
 ```
 
-Prepare the local live model before the first meeting:
+Live start prepares its local model automatically. To download it before a meeting:
 
 ```bash
 record live setup
@@ -108,6 +108,8 @@ record live stop --json
 ```
 
 `start` records the selected app normally while a separate worker receives 16 kHz mono application-audio frames. It emits local JSONL events at `live-transcript.jsonl`; committed transcript events include an ordered cursor, source-audio timestamp, delivery latency, and commit reason. Native end-of-utterance is used when available, with stable-partial and maximum-utterance fallbacks so continuous meeting audio cannot stall the stream.
+
+On first use, `start` checks Screen & System Audio Recording permission, opens the macOS permission flow when needed, and prepares the approximately 430 MB live model with visible progress. `record live setup` is only needed to pre-warm that download. `record live doctor` is read-only and reports an actionable setup error when the model is absent or invalid.
 
 `next` returns committed events only. Pass its `next_cursor` into the following call. This cursor contract lets either agent plugin maintain rolling context and surface questions without sending unstable partial hypotheses to the model. Microphone capture and speaker diarization are not included in this first release.
 
