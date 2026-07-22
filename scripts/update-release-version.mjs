@@ -41,6 +41,7 @@ async function checkVersion(expectedVersion) {
     "package.json",
     "packages/capture/package.json",
     "packages/transcribe/package.json",
+    "packages/live/package.json",
     "plugins/record/.codex-plugin/plugin.json",
     "plugins/record/claude/.claude-plugin/plugin.json",
   ]) {
@@ -53,6 +54,7 @@ async function checkVersion(expectedVersion) {
     ["package-lock.json workspace root", packageLock.packages[""].version],
     ["package-lock.json capture workspace", packageLock.packages["packages/capture"].version],
     ["package-lock.json transcribe workspace", packageLock.packages["packages/transcribe"].version],
+    ["package-lock.json live workspace", packageLock.packages["packages/live"].version],
   );
 
   const textChecks = [
@@ -63,6 +65,7 @@ async function checkVersion(expectedVersion) {
       /case "--version", "-V":\s+print\("([^"]+)"\)/m,
     ],
     ["packages/transcribe/src/index.ts", "packages/transcribe/src/index.ts", /\.version\("([^"]+)"\)/],
+    ["packages/live/native/Sources/LiveCLI/main.swift", "packages/live/native/Sources/LiveCLI/main.swift", /case "--version", "-V":\s+print\("([^"]+)"\)/m],
     ["Formula/record.rb", "Formula/record.rb", /^  version "([^"]+)"/m],
     ["Formula/record.rb release URL", "Formula/record.rb", /releases\/download\/v([^/]+)\//],
   ];
@@ -84,6 +87,7 @@ async function updateVersion(version) {
     "package.json",
     "packages/capture/package.json",
     "packages/transcribe/package.json",
+    "packages/live/package.json",
     "plugins/record/.codex-plugin/plugin.json",
     "plugins/record/claude/.claude-plugin/plugin.json",
   ]) {
@@ -97,6 +101,7 @@ async function updateVersion(version) {
   packageLock.packages[""].version = version;
   packageLock.packages["packages/capture"].version = version;
   packageLock.packages["packages/transcribe"].version = version;
+  packageLock.packages["packages/live"].version = version;
   await writeJson("package-lock.json", packageLock);
 
   await replace("scripts/record", /^version="[^"]+"/m, `version="${version}"`);
@@ -106,6 +111,11 @@ async function updateVersion(version) {
     `$1${version}$2`,
   );
   await replace("packages/transcribe/src/index.ts", /\.version\("[^"]+"\)/, `.version("${version}")`);
+  await replace(
+    "packages/live/native/Sources/LiveCLI/main.swift",
+    /(case "--version", "-V":\s+print\(")[^"]+("\))/m,
+    `$1${version}$2`,
+  );
   await replace(
     "Formula/record.rb",
     /releases\/download\/v[^/]+\/record-[^/]+-macos-arm64\.tar\.gz/,

@@ -47,6 +47,7 @@ expect_failure_contains() {
 [[ -f "$plugin_root/claude/.claude-plugin/plugin.json" ]] || fail "missing Claude plugin manifest"
 [[ -x "$script_dir/run-capture.sh" ]] || fail "run-capture.sh is not executable"
 [[ -x "$script_dir/run-transcribe.sh" ]] || fail "run-transcribe.sh is not executable"
+[[ -x "$script_dir/run-live.sh" ]] || fail "run-live.sh is not executable"
 
 python3 -m json.tool "$plugin_root/.codex-plugin/plugin.json" >/dev/null
 python3 -m json.tool "$plugin_root/claude/.claude-plugin/plugin.json" >/dev/null
@@ -57,6 +58,7 @@ fi
 if [[ -f "$skill_validator" ]]; then
   run python3 "$skill_validator" "$plugin_root/skills/capture"
   run python3 "$skill_validator" "$plugin_root/skills/transcribe"
+  run python3 "$skill_validator" "$plugin_root/skills/live"
 fi
 if command -v claude >/dev/null 2>&1; then
   run claude plugin validate --strict "$plugin_root/claude"
@@ -69,6 +71,12 @@ tmp_input="$tmp_dir/input.wav"
 touch "$tmp_input"
 
 safe_path="/usr/bin:/bin"
+
+expect_failure_contains \
+  "missing record CLI for live" \
+  127 \
+  "brew install jlave-dev/tap/record" \
+  env PATH="$safe_path" /bin/bash "$script_dir/run-live.sh" status
 
 expect_failure_contains \
   "missing record CLI for capture" \
@@ -93,5 +101,7 @@ expect_failure_contains \
   2 \
   "Conflicting source flags" \
   env PATH="$safe_path" /bin/bash "$script_dir/run-transcribe.sh" --input "$tmp_input" --output "$tmp_dir/out" --copy-source --move-source
+
+run "$script_dir/test-live-adapters.sh"
 
 echo "Plugin smoke test passed: $plugin_root"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Live meeting"
+  short_description: "Stream local meeting transcript and surface timely questions"
+  default_prompt: "Use $live to follow a visible meeting app in real time and surface concise, timestamp-grounded context and questions."

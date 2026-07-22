@@ -1,6 +1,6 @@
 {
   "name": "record",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Adapter skills for the Homebrew-installed record CLI.",
   "author": {
     "name": "James Lave",
@@ -15,19 +15,21 @@
     "macos",
     "screencapturekit",
     "whisper",
+    "live transcription",
     "local-first"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Record",
-    "shortDescription": "Capture apps and transcribe local media.",
-    "longDescription": "Record exposes capture and transcribe skills for the Homebrew-installed record CLI. It helps agents start and stop native ScreenCaptureKit Mac app recordings and transcribe local media with whisper.cpp while keeping recordings, transcripts, metadata, and setup state on the user's machine.",
+    "shortDescription": "Capture, transcribe, and follow meetings live.",
+    "longDescription": "Record exposes capture, transcription, and live meeting skills for the Homebrew-installed record CLI. It can stream local ScreenCaptureKit app audio into on-device transcription so an active agent can surface timely, timestamp-grounded context and questions.",
     "developerName": "James Lave",
     "category": "Productivity",
     "capabilities": [
       "app capture",
       "recording control",
       "local transcription",
+      "live meeting feedback",
       "artifact triage",
       "setup diagnostics"
     ],
@@ -36,7 +38,8 @@
     "termsOfServiceURL": "https://github.com/jlave-dev/agent-skills/blob/main/TERMS.md",
     "defaultPrompt": [
       "Use $capture to record a visible Mac app.",
-      "Use $transcribe to transcribe a local media file."
+      "Use $transcribe to transcribe a local media file.",
+      "Use $live to follow a visible meeting and surface timestamp-grounded context and questions."
     ],
     "brandColor": "#0B5F45",
     "composerIcon": "./assets/icon.png",

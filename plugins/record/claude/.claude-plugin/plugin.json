@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "record",
   "displayName": "Record",
-  "version": "0.4.0",
-  "description": "Capture Mac apps and transcribe local media with the Homebrew-installed record CLI.",
+  "version": "0.4.1",
+  "description": "Capture Mac apps, transcribe local media, and follow meetings live with the Homebrew-installed record CLI.",
   "author": {
     "name": "James Lave"
   },
@@ -16,6 +16,7 @@
     "macos",
     "screencapturekit",
     "whisper",
+    "live transcription",
     "local-first"
   ]
 }

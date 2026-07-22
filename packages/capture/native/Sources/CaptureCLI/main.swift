@@ -35,7 +35,7 @@ struct CaptureCLI {
         case "help", "--help", "-h":
             printHelp()
         case "--version", "-V":
-            print("0.4.0")
+            print("0.4.1")
         default:
             throw CaptureCoreError.message("Unknown command \"\(command)\". Run capture --help.")
         }
@@ -49,6 +49,11 @@ struct CaptureCLI {
         let output = takeOption("--output", from: &arguments)
         let width = try positiveInteger(takeOption("--width", from: &arguments), name: "Width")
         let height = try positiveInteger(takeOption("--height", from: &arguments), name: "Height")
+        let liveWorker = takeOption("--live-worker", from: &arguments)
+        let liveEvents = takeOption("--live-events", from: &arguments)
+        guard (liveWorker == nil) == (liveEvents == nil) else {
+            throw CaptureCoreError.message("Live capture requires both --live-worker and --live-events.")
+        }
         guard arguments.isEmpty else {
             throw CaptureCoreError.message("Unknown start argument: \(arguments[0])")
         }
@@ -66,17 +71,36 @@ struct CaptureCLI {
         let outputDir = try prepareOutputDirectory(output, app: app)
         let outputPath = outputDir.appendingPathComponent("recording.mp4")
         let metadataPath = outputDir.appendingPathComponent("metadata.json")
+        let liveWorkerPath = try liveWorker.map { worker in
+            let url = expandPath(worker)
+            guard FileManager.default.isExecutableFile(atPath: url.path) else {
+                throw CaptureCoreError.message("Live worker is not executable: \(url.path)")
+            }
+            return url.path
+        }
+        let liveEventsPath = try liveEvents.map { path in
+            let url = expandPath(path)
+            guard url.deletingLastPathComponent().standardizedFileURL == outputDir.standardizedFileURL else {
+                throw CaptureCoreError.message("Live events must be written inside the capture output directory.")
+            }
+            guard !FileManager.default.fileExists(atPath: url.path) else {
+                throw CaptureCoreError.message("Refusing to overwrite live events: \(url.path)")
+            }
+            return url.path
+        }
         let token = UUID().uuidString.lowercased()
         let requestURL = CapturePaths.request(token: token)
-        let request = CaptureRequest(action: .start, token: token, app: app, outputDir: outputDir.path, width: width, height: height)
-        let state = CaptureState(token: token, status: .starting, requestedApp: app, outputDir: outputDir.path, outputPath: outputPath.path, metadataPath: metadataPath.path)
+        let request = CaptureRequest(action: .start, token: token, app: app, outputDir: outputDir.path, width: width, height: height, liveWorkerPath: liveWorkerPath, liveEventsPath: liveEventsPath)
+        var state = CaptureState(token: token, status: .starting, requestedApp: app, outputDir: outputDir.path, outputPath: outputPath.path, metadataPath: metadataPath.path)
+        state.liveEventsPath = liveEventsPath
+        state.liveStatus = liveEventsPath == nil ? nil : .starting
 
         try? FileManager.default.removeItem(at: CapturePaths.stop)
         try writeJSON(request, to: requestURL)
         try writeJSON(state, to: CapturePaths.state)
         try launchAgent(requestPath: requestURL)
 
-        let result = try waitForState(token: token, timeout: 60) { $0.status == .recording || $0.status == .failed }
+        let result = try waitForState(token: token, timeout: liveWorkerPath == nil ? 60 : 240) { $0.status == .recording || $0.status == .failed }
         if result.status == .failed {
             throw CaptureCoreError.message(result.error ?? "Capture failed to start.")
         }
@@ -95,7 +119,7 @@ struct CaptureCLI {
         }
 
         try Data(state.token.utf8).write(to: CapturePaths.stop, options: [.atomic])
-        let result = try waitForState(token: state.token, timeout: 30) { $0.status == .stopped || $0.status == .failed }
+        let result = try waitForState(token: state.token, timeout: 60) { $0.status == .stopped || $0.status == .failed }
         if result.status == .failed {
             throw CaptureCoreError.message(result.error ?? "Capture failed while stopping.")
         }
@@ -223,6 +247,9 @@ struct CaptureCLI {
             if let appName = state.appName { print("App: \(appName)") }
             print("Output: \(state.outputPath)")
             print("Metadata: \(state.metadataPath)")
+            if let liveEventsPath = state.liveEventsPath { print("Live transcript: \(liveEventsPath)") }
+            if let liveStatus = state.liveStatus { print("Live transcription: \(liveStatus.rawValue)") }
+            if let liveError = state.liveError { print("Live transcription error: \(liveError)") }
             if let error = state.error { print("Error: \(error)") }
         }
     }

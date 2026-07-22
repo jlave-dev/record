@@ -45,6 +45,199 @@ final class CaptureDelegate: NSObject, SCRecordingOutputDelegate, SCStreamDelega
     }
 }
 
+private final class LiveWorkerProcess {
+    let process = Process()
+    let input = Pipe()
+    private let readyURL: URL
+    private let logHandle: FileHandle
+
+    init(executable: URL, eventsURL: URL, outputDirectory: URL) throws {
+        readyURL = outputDirectory.appendingPathComponent(".live-worker-ready")
+        let logURL = outputDirectory.appendingPathComponent("live-worker.log")
+        FileManager.default.createFile(atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        logHandle = try FileHandle(forWritingTo: logURL)
+        try? FileManager.default.removeItem(at: readyURL)
+
+        process.executableURL = executable
+        process.arguments = ["stream", "--events", eventsURL.path, "--ready", readyURL.path]
+        process.standardInput = input
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = logHandle
+        try process.run()
+    }
+
+    var processIdentifier: Int32 { process.processIdentifier }
+
+    func waitUntilReady(timeout: TimeInterval) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: readyURL.path) {
+                try? FileManager.default.removeItem(at: readyURL)
+                return
+            }
+            if !process.isRunning {
+                throw CaptureCoreError.message("Live transcription worker exited during startup. See live-worker.log.")
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        throw CaptureCoreError.message("Timed out preparing live transcription. Run `record live setup` before retrying.")
+    }
+
+    func finish(timeout: TimeInterval = 30) throws {
+        try? input.fileHandleForWriting.close()
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        if process.isRunning {
+            process.terminate()
+            throw CaptureCoreError.message("Live transcription worker did not stop after its audio stream ended.")
+        }
+        try? logHandle.close()
+        guard process.terminationStatus == 0 else {
+            throw CaptureCoreError.message("Live transcription worker failed. See live-worker.log.")
+        }
+    }
+
+    func cancel() {
+        try? input.fileHandleForWriting.close()
+        if process.isRunning { process.terminate() }
+        try? logHandle.close()
+        try? FileManager.default.removeItem(at: readyURL)
+    }
+}
+
+private final class LiveAudioForwarder: NSObject, SCStreamOutput {
+    struct Snapshot {
+        let delivered: Int
+        let dropped: Int
+        let error: String?
+    }
+
+    private let input: FileHandle
+    private let outputFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+    private let writerQueue = DispatchQueue(label: "dev.record.live-audio-writer")
+    private let pending = DispatchSemaphore(value: 16)
+    private let writes = DispatchGroup()
+    private let lock = NSLock()
+    private var converter: AVAudioConverter?
+    private var converterInputFormat: AVAudioFormat?
+    private var firstPresentationTime: CMTime?
+    private var delivered = 0
+    private var dropped = 0
+    private var failure: String?
+
+    init(input: FileHandle) {
+        self.input = input
+        super.init()
+        _ = fcntl(input.fileDescriptor, F_SETNOSIGPIPE, 1)
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
+        guard outputType == .audio, CMSampleBufferDataIsReady(sampleBuffer) else { return }
+        do {
+            let frame = try encodedFrame(from: sampleBuffer)
+            guard pending.wait(timeout: .now()) == .success else {
+                lock.withLock { dropped += 1 }
+                return
+            }
+            writes.enter()
+            writerQueue.async { [self] in
+                defer {
+                    pending.signal()
+                    writes.leave()
+                }
+                do {
+                    try input.write(contentsOf: frame)
+                    lock.withLock { delivered += 1 }
+                } catch {
+                    lock.withLock {
+                        dropped += 1
+                        if failure == nil { failure = error.localizedDescription }
+                    }
+                }
+            }
+        } catch {
+            lock.withLock {
+                dropped += 1
+                if failure == nil { failure = error.localizedDescription }
+            }
+        }
+    }
+
+    func finish() -> Snapshot {
+        writes.wait()
+        return snapshot()
+    }
+
+    func snapshot() -> Snapshot {
+        lock.withLock { Snapshot(delivered: delivered, dropped: dropped, error: failure) }
+    }
+
+    private func encodedFrame(from sampleBuffer: CMSampleBuffer) throws -> Data {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription),
+              let inputFormat = AVAudioFormat(streamDescription: streamDescription) else {
+            throw CaptureCoreError.message("Live audio has no supported format description.")
+        }
+        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frameCount > 0,
+              let inputBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: frameCount) else {
+            throw CaptureCoreError.message("Could not allocate a live audio input buffer.")
+        }
+        inputBuffer.frameLength = frameCount
+        let copyStatus = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(frameCount),
+            into: inputBuffer.mutableAudioBufferList
+        )
+        guard copyStatus == noErr else {
+            throw CaptureCoreError.message("Could not read live audio samples (\(copyStatus)).")
+        }
+
+        if converter == nil || converterInputFormat != inputFormat {
+            converter = AVAudioConverter(from: inputFormat, to: outputFormat)
+            converterInputFormat = inputFormat
+        }
+        guard let converter else { throw CaptureCoreError.message("Could not create the live audio converter.") }
+        let capacity = AVAudioFrameCount(ceil(Double(frameCount) * outputFormat.sampleRate / inputFormat.sampleRate)) + 32
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
+            throw CaptureCoreError.message("Could not allocate a live audio output buffer.")
+        }
+        var suppliedInput = false
+        var conversionError: NSError?
+        let conversionStatus = converter.convert(to: outputBuffer, error: &conversionError) { _, status in
+            if suppliedInput {
+                status.pointee = .noDataNow
+                return nil
+            }
+            suppliedInput = true
+            status.pointee = .haveData
+            return inputBuffer
+        }
+        guard conversionStatus != .error, conversionError == nil,
+              let channel = outputBuffer.floatChannelData?[0] else {
+            throw conversionError ?? CaptureCoreError.message("Could not convert live audio to 16 kHz mono.")
+        }
+
+        let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        if firstPresentationTime == nil { firstPresentationTime = presentationTime }
+        let sourceAudioMs = max(0, Int64((CMTimeGetSeconds(presentationTime - firstPresentationTime!) * 1000).rounded()))
+        let sampleCount = Int(outputBuffer.frameLength)
+        var data = Data()
+        append(UInt32(0x524C4956), to: &data)
+        append(UInt32(1), to: &data)
+        append(sourceAudioMs, to: &data)
+        append(UInt32(sampleCount), to: &data)
+        data.append(UnsafeBufferPointer(start: channel, count: sampleCount))
+        return data
+    }
+
+    private func append<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+        var littleEndian = value.littleEndian
+        withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
+    }
+}
+
 private enum CaptureSourceKey: Equatable {
     case application(CGDirectDisplayID)
     case zoomShare(CGDirectDisplayID, CGRect)
@@ -106,8 +299,11 @@ struct CaptureAgent {
         }
         let outputURL = URL(fileURLWithPath: outputDir).appendingPathComponent("recording.mp4")
         let metadataURL = URL(fileURLWithPath: outputDir).appendingPathComponent("metadata.json")
+        let outputDirectoryURL = URL(fileURLWithPath: outputDir)
         var state = CaptureState(token: request.token, status: .starting, requestedApp: requestedApp, outputDir: outputDir, outputPath: outputURL.path, metadataPath: metadataURL.path)
         state.pid = Int32(ProcessInfo.processInfo.processIdentifier)
+        state.liveEventsPath = request.liveEventsPath
+        state.liveStatus = request.liveEventsPath == nil ? nil : .starting
         try writeJSON(state, to: CapturePaths.state)
 
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -183,6 +379,36 @@ struct CaptureAgent {
         }
         defer { _ = audioDelegate }
 
+        var liveWorker: LiveWorkerProcess?
+        var liveForwarder: LiveAudioForwarder?
+        let liveAudioQueue = DispatchQueue(label: "dev.record.live-audio-capture")
+        if request.liveWorkerPath != nil || request.liveEventsPath != nil {
+            guard let workerPath = request.liveWorkerPath, let eventsPath = request.liveEventsPath else {
+                throw CaptureCoreError.message("Live capture request is missing its worker or event path.")
+            }
+            let worker = try LiveWorkerProcess(
+                executable: URL(fileURLWithPath: workerPath),
+                eventsURL: URL(fileURLWithPath: eventsPath),
+                outputDirectory: outputDirectoryURL
+            )
+            liveWorker = worker
+            state.liveWorkerPID = worker.processIdentifier
+            try writeJSON(state, to: CapturePaths.state)
+            do {
+                try worker.waitUntilReady(timeout: 180)
+                let forwarder = LiveAudioForwarder(input: worker.input.fileHandleForWriting)
+                if let audioStream {
+                    try audioStream.addStreamOutput(forwarder, type: .audio, sampleHandlerQueue: liveAudioQueue)
+                } else {
+                    try stream.addStreamOutput(forwarder, type: .audio, sampleHandlerQueue: liveAudioQueue)
+                }
+                liveForwarder = forwarder
+            } catch {
+                worker.cancel()
+                throw error
+            }
+        }
+
         var captureStarted = false
         var audioCaptureStarted = false
         do {
@@ -204,9 +430,11 @@ struct CaptureAgent {
             state.width = dimensions.width
             state.height = dimensions.height
             state.startedAt = nowISO8601()
+            state.liveStatus = liveForwarder == nil ? nil : .running
             try writeJSON(state, to: CapturePaths.state)
 
             var nextSourceRefresh = Date()
+            var nextLiveStateRefresh = Date().addingTimeInterval(1)
             while true {
                 if let stopToken = try? String(contentsOf: CapturePaths.stop, encoding: .utf8), stopToken == request.token { break }
                 if case .failed(let message) = await events.snapshot() { throw CaptureCoreError.message(message) }
@@ -226,6 +454,17 @@ struct CaptureAgent {
                             FileHandle.standardError.write(Data("Could not follow Zoom share: \(error.localizedDescription)\n".utf8))
                         }
                     }
+                }
+                if let liveForwarder, Date() >= nextLiveStateRefresh {
+                    nextLiveStateRefresh = Date().addingTimeInterval(1)
+                    let snapshot = liveForwarder.snapshot()
+                    state.liveFramesDelivered = snapshot.delivered
+                    state.liveFramesDropped = snapshot.dropped
+                    if let failure = snapshot.error {
+                        state.liveStatus = .failed
+                        state.liveError = failure
+                    }
+                    try writeJSON(state, to: CapturePaths.state)
                 }
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
@@ -248,6 +487,25 @@ struct CaptureAgent {
                 try? FileManager.default.removeItem(at: audioOutputURL)
             }
 
+            if let liveForwarder, let liveWorker {
+                let snapshot = liveForwarder.finish()
+                state.liveFramesDelivered = snapshot.delivered
+                state.liveFramesDropped = snapshot.dropped
+                if let failure = snapshot.error {
+                    state.liveStatus = .failed
+                    state.liveError = failure
+                }
+                do {
+                    try liveWorker.finish()
+                    if state.liveError == nil {
+                        state.liveStatus = .stopped
+                    }
+                } catch {
+                    state.liveStatus = .failed
+                    state.liveError = state.liveError ?? error.localizedDescription
+                }
+            }
+
             let stoppedAt = nowISO8601()
             let metadata = CaptureMetadata(
                 appName: application.applicationName,
@@ -257,7 +515,11 @@ struct CaptureAgent {
                 width: dimensions.width,
                 height: dimensions.height,
                 startedAt: state.startedAt!,
-                stoppedAt: stoppedAt
+                stoppedAt: stoppedAt,
+                liveEventsPath: state.liveEventsPath,
+                liveFramesDelivered: state.liveFramesDelivered,
+                liveFramesDropped: state.liveFramesDropped,
+                liveError: state.liveError
             )
             try writeJSON(metadata, to: metadataURL)
             state.status = .stopped
@@ -267,6 +529,7 @@ struct CaptureAgent {
         } catch {
             if captureStarted { try? await stream.stopCapture() }
             if audioCaptureStarted { try? await audioStream?.stopCapture() }
+            liveWorker?.cancel()
             try? FileManager.default.removeItem(at: audioOutputURL)
             state.status = .failed
             state.error = error.localizedDescription

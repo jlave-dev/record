@@ -41,6 +41,7 @@
           "packages/*/package.json",
           "packages/capture/native/Sources/CaptureCLI/main.swift",
           "packages/transcribe/src/index.ts",
+          "packages/live/native/Sources/LiveCLI/main.swift",
           "plugins/record/.codex-plugin/plugin.json",
           "plugins/record/claude/.claude-plugin/plugin.json",
           "scripts/record",

@@ -31,8 +31,10 @@ fi
 capture_app="$bundle_dir/libexec/record/capture/CaptureAgent.app"
 capture_cli="$bundle_dir/libexec/record/capture/capture"
 transcribe_cli="$bundle_dir/libexec/record/transcribe"
+live_cli="$bundle_dir/libexec/record/live/live"
+live_worker="$bundle_dir/libexec/record/live/live-worker"
 
-for signed_path in "$capture_app" "$capture_cli" "$transcribe_cli"; do
+for signed_path in "$capture_app" "$capture_cli" "$transcribe_cli" "$live_cli" "$live_worker"; do
   codesign --verify --deep --strict --verbose=2 "$signed_path"
   codesign -dv --verbose=4 "$signed_path" 2>&1 | grep -F "Authority=Developer ID Application" >/dev/null || {
     echo "$signed_path is not signed with a Developer ID Application certificate." >&2

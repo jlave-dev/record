@@ -1,0 +1,16 @@
+{
+  "name": "live",
+  "version": "0.4.1",
+  "description": "Native local live-transcription runtime.",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "./scripts/build.sh",
+    "test": "swift test --package-path native",
+    "test:prerecorded": "./scripts/test-prerecorded.sh"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
