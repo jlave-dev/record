@@ -36,8 +36,9 @@ public struct AudioFrame: Sendable, Equatable {
         guard let payload = try handle.readExactly(Int(sampleCount) * MemoryLayout<Float>.size) else {
             throw LiveError("truncated audio frame payload")
         }
-        let samples = payload.withUnsafeBytes { rawBuffer -> [Float] in
-            Array(rawBuffer.bindMemory(to: Float.self))
+        var samples = [Float](repeating: 0, count: Int(sampleCount))
+        _ = samples.withUnsafeMutableBytes { destination in
+            payload.copyBytes(to: destination)
         }
         return AudioFrame(sourceAudioMs: sourceAudioMs, samples: samples)
     }
