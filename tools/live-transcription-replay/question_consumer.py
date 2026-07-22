@@ -115,6 +115,8 @@ def main() -> None:
 
     with args.output.open("a") as output:
         while True:
+            # ponytail: reread the small replay log; keep an open tail cursor if
+            # long meetings make polling expensive.
             event_data = args.events.read_text() if args.events.exists() else ""
             lines = event_data.splitlines()
             if event_data and not event_data.endswith("\n"):

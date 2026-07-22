@@ -38,6 +38,8 @@ def summarize(events: list[dict]) -> dict:
 
     return {
         "schema_version": 1,
+        "engine": "fluidaudio-parakeet-eou-replay",
+        "model": "FluidAudio 0.15.5 / Parakeet EOU 120M 320ms",
         "event_count": len(events),
         "partial_count": len(partials),
         "final_count": len(finals),

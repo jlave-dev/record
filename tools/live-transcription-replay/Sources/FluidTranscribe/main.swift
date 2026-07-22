@@ -1,7 +1,76 @@
-import ABSupport
 import AVFoundation
 import FluidAudio
 import Foundation
+
+private struct CLIOptions: Sendable {
+    let input: URL
+    let events: URL
+    let stablePartialMs: Int
+    let maxUtteranceMs: Int
+
+    static func parse(_ arguments: [String]) throws -> CLIOptions {
+        var input: String?
+        var events: String?
+        var stablePartialMs = 1500
+        var maxUtteranceMs = 15_000
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            if argument == "-h" || argument == "--help" {
+                throw CLIError(
+                    "usage: fluid-transcribe --input canonical.wav --events events.jsonl [--stable-partial-ms 1500] [--max-utterance-ms 15000]",
+                    exitCode: 0
+                )
+            }
+            index += 1
+            guard index < arguments.count else { throw CLIError("\(argument) requires a value") }
+            let value = arguments[index]
+            switch argument {
+            case "--input": input = value
+            case "--events": events = value
+            case "--stable-partial-ms":
+                guard let parsed = Int(value), parsed > 0 else {
+                    throw CLIError("--stable-partial-ms requires a positive integer")
+                }
+                stablePartialMs = parsed
+            case "--max-utterance-ms":
+                guard let parsed = Int(value), parsed > 0 else {
+                    throw CLIError("--max-utterance-ms requires a positive integer")
+                }
+                maxUtteranceMs = parsed
+            default: throw CLIError("unknown argument: \(argument)")
+            }
+            index += 1
+        }
+
+        guard let input, let events else {
+            throw CLIError("--input and --events are required")
+        }
+        let inputURL = URL(fileURLWithPath: input).standardizedFileURL
+        guard FileManager.default.isReadableFile(atPath: inputURL.path) else {
+            throw CLIError("input is not readable: \(inputURL.path)")
+        }
+        let eventsURL = URL(fileURLWithPath: events).standardizedFileURL
+
+        return CLIOptions(
+            input: inputURL,
+            events: eventsURL,
+            stablePartialMs: stablePartialMs,
+            maxUtteranceMs: maxUtteranceMs
+        )
+    }
+}
+
+private struct CLIError: Error {
+    let message: String
+    let exitCode: Int32
+
+    init(_ message: String, exitCode: Int32 = 2) {
+        self.message = message
+        self.exitCode = exitCode
+    }
+}
 
 @main
 struct FluidTranscribe {
@@ -19,53 +88,16 @@ struct FluidTranscribe {
     }
 
     private static func transcribe(_ options: CLIOptions) async throws {
-        guard options.locale.language.languageCode?.identifier == "en" else {
-            throw CLIError("FluidAudio Parakeet EOU currently supports English; use --locale en-US")
-        }
-
         let manager = StreamingEouAsrManager(chunkSize: .ms320, eouDebounceMs: 1280)
         try await manager.loadModels()
-
-        if let eventsURL = options.replayEvents {
-            try await replay(options, manager: manager, eventsURL: eventsURL)
-            return
-        }
-
-        let audioFile = try AVAudioFile(forReading: options.input)
-        let frameCount = AVAudioFrameCount(audioFile.length)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: audioFile.processingFormat, frameCapacity: frameCount) else {
-            throw CLIError("could not allocate audio buffer")
-        }
-        try audioFile.read(into: buffer)
-
-        let clock = ContinuousClock()
-        let started = clock.now
-        await manager.reset()
-        var transcript = try await manager.process(audioBuffer: buffer)
-        transcript += try await manager.finish()
-        let processingSeconds = seconds(started.duration(to: clock.now))
-        let eouTimestamps = await manager.getEouTimestampsMs()
-
-        let result = TranscriptResult(
-            engine: "fluidaudio-parakeet-eou",
-            model: "FluidAudio 0.15.5 / Parakeet EOU 120M 320ms",
-            locale: options.locale.identifier,
-            inputFile: options.input.lastPathComponent,
-            audioDurationSeconds: try audioDurationSeconds(options.input),
-            processingSeconds: processingSeconds,
-            transcript: transcript.split(whereSeparator: \Character.isWhitespace).joined(separator: " "),
-            segments: [],
-            endOfUtteranceTimestampsMs: eouTimestamps
-        )
-        try writeResult(result, to: options.output)
+        try await replay(options, manager: manager)
     }
 
     private static func replay(
         _ options: CLIOptions,
-        manager: StreamingEouAsrManager,
-        eventsURL: URL
+        manager: StreamingEouAsrManager
     ) async throws {
-        let writer = try ReplayEventWriter(url: eventsURL)
+        let writer = try ReplayEventWriter(url: options.events)
         await manager.setPartialCallback { writer.partial($0) }
         await manager.setEouCallback { writer.final($0, reason: "end_of_utterance") }
         await manager.reset()
@@ -117,24 +149,6 @@ struct FluidTranscribe {
             writer.final(tail, reason: "end_of_stream")
         }
         try writer.close()
-
-        let processingSeconds = seconds(started.duration(to: clock.now))
-        let result = TranscriptResult(
-            engine: "fluidaudio-parakeet-eou-replay",
-            model: "FluidAudio 0.15.5 / Parakeet EOU 120M 320ms",
-            locale: options.locale.identifier,
-            inputFile: options.input.lastPathComponent,
-            audioDurationSeconds: try audioDurationSeconds(options.input),
-            processingSeconds: processingSeconds,
-            transcript: writer.committedTranscript,
-            segments: []
-        )
-        try writeResult(result, to: options.output)
-    }
-
-    private static func seconds(_ duration: Duration) -> Double {
-        let components = duration.components
-        return Double(components.seconds) + Double(components.attoseconds) / 1e18
     }
 }
 
@@ -160,7 +174,6 @@ private final class ReplayEventWriter: @unchecked Sendable {
     private var utteranceStartAudioMs = 0
     private var lastPartialAudioMs = 0
     private var lastPartial = ""
-    private var committed: [String] = []
     private var errorMessage: String?
     private var isClosed = false
 
@@ -184,12 +197,6 @@ private final class ReplayEventWriter: @unchecked Sendable {
             throw CLIError("could not create replay event file: \(url.path)")
         }
         handle = try FileHandle(forWritingTo: url)
-    }
-
-    var committedTranscript: String {
-        lock.lock()
-        defer { lock.unlock() }
-        return committed.joined(separator: " ")
     }
 
     func setSourceAudioMs(_ value: Int) {
@@ -227,7 +234,6 @@ private final class ReplayEventWriter: @unchecked Sendable {
         guard !normalized.isEmpty else { return }
         lock.lock()
         defer { lock.unlock() }
-        committed.append(normalized)
         lastPartial = ""
         utteranceStartAudioMs = sourceAudioMs
         lastPartialAudioMs = sourceAudioMs
