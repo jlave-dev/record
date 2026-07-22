@@ -74,7 +74,7 @@ done
 command -v ffmpeg >/dev/null 2>&1 || { echo "ffmpeg is required: brew install ffmpeg" >&2; exit 127; }
 command -v swift >/dev/null 2>&1 || { echo "Swift/Xcode is required" >&2; exit 127; }
 if [[ "$questions" == true ]]; then
-  command -v claude >/dev/null 2>&1 || { echo "Claude Code is required for --questions" >&2; exit 127; }
+  command -v codex >/dev/null 2>&1 || { echo "Codex CLI is required for --questions" >&2; exit 127; }
 fi
 
 macos_major="$(sw_vers -productVersion | cut -d. -f1)"
@@ -109,7 +109,7 @@ if [[ "$fluid_replay" == true ]]; then
   swift build --package-path "$script_dir" -c release --product fluid-transcribe
 
   if [[ "$questions" == true ]]; then
-    echo "Starting Claude context/question consumer..."
+    echo "Starting Codex context/question consumer..."
     python3 "$script_dir/question_consumer.py" \
       --events "$output_dir/events.jsonl" \
       --done "$output_dir/fluid.json" \

@@ -1,6 +1,6 @@
 # Local Live-Transcription Replay and A/B Test
 
-Replay a prerecorded meeting at source speed through FluidAudio, emit timestamped transcript events, and optionally have Claude generate grounded context and questions while the meeting plays. On macOS 26, the same tool can also compare final FluidAudio output with Apple SpeechTranscriber.
+Replay a prerecorded meeting at source speed through FluidAudio, emit timestamped transcript events, and optionally have Codex generate grounded context and questions while the meeting plays. On macOS 26, the same tool can also compare final FluidAudio output with Apple SpeechTranscriber.
 
 This is a test harness, not live ScreenCaptureKit capture. It proves the transcription-to-feedback loop with prerecorded media before capture code changes.
 
@@ -11,7 +11,8 @@ This is a test harness, not live ScreenCaptureKit capture. It proves the transcr
 - FluidAudio transcription runs locally with an open-source Core ML model.
 - Replay events and results are mode `600` in the output directory you choose.
 - First use downloads FluidAudio source and its model; no meeting audio is uploaded.
-- `--questions` sends the rolling committed transcript excerpt—not raw audio—to Anthropic through the installed Claude Code CLI. Use it only when company policy permits that text to leave the machine.
+- `--questions` sends the rolling committed transcript excerpt—not raw audio—to OpenAI through the installed Codex CLI. Use it only when company policy permits that text to leave the machine.
+- Each Codex request is ephemeral, read-only, schema-constrained, and isolated from repository rules and user configuration; the user's existing Codex authentication is still used.
 - Never put private results in this checkout or commit, push, paste, or upload them.
 
 ## Requirements
@@ -23,7 +24,7 @@ FluidAudio replay:
 - Homebrew ffmpeg: `brew install ffmpeg`.
 - English audio.
 - Network access for the first build/model download.
-- Installed and authenticated Claude Code only when using `--questions`.
+- Installed and authenticated Codex CLI only when using `--questions`.
 
 Apple-vs-FluidAudio batch comparison additionally requires macOS 26 and Xcode 26. On an older SDK, the Apple executable builds as an actionable unsupported stub instead of failing on missing symbols.
 
@@ -59,7 +60,7 @@ Start with a two-minute excerpt. Without `--questions`, everything remains local
 
 The replay is timestamp-paced, so a two-minute excerpt takes about two minutes after model setup. Omit `--start` and `--duration` only when you intend to replay the complete meeting in real time.
 
-If transcript text is approved for Claude:
+If transcript text is approved for Codex:
 
 ```bash
 ./tools/live-transcription-ab/run-ab.sh \
@@ -80,7 +81,7 @@ The private output directory contains:
 - `events.jsonl`: ordered `transcript.partial` and `transcript.final` events.
 - `replay-summary.json`: first partial/final timing and P50/P95/max delivery latency.
 - `fluid.json`: final replay transcript and engine metadata.
-- `questions.jsonl`: optional timestamped Claude context/questions with transcript evidence cursors and generation latency.
+- `questions.jsonl`: optional timestamped Codex context/questions with transcript evidence cursors and generation latency.
 
 Inspect locally:
 
@@ -106,6 +107,12 @@ yt-dlp -f 18 \
   --output "$HOME/record-live-results/public-opening" \
   --duration 120
 ```
+
+## Current public-fixture proof
+
+On a two-minute timestamp-paced replay, the harness emitted 168 partials and 13 committed finals. First partial text appeared at 3.52 seconds of source audio; partial and final delivery P95 were 82 ms and 113 ms. Codex produced three distinct evidence-linked context/question events at 4.85, 9.93, and 9.43 seconds after their triggering commits.
+
+This proves the prerecorded local-ASR-to-Codex loop. It does not yet prove live ScreenCaptureKit delivery, cursor resume, or the plan's stricter 8-second P95 agent-feedback gate; Codex CLI latency needs more repeated measurement and optimization before release readiness.
 
 ## Run the macOS 26 A/B comparison
 

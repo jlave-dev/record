@@ -2,6 +2,7 @@
 import argparse
 import json
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,7 +28,29 @@ def timestamp(milliseconds: int) -> str:
     return f"{seconds // 60:02d}:{seconds % 60:02d}"
 
 
-def ask_claude(events: list[dict], prior_questions: list[str]) -> tuple[dict, int]:
+def codex_command(work_dir: Path, schema_path: Path, response_path: Path) -> list[str]:
+    return [
+        "codex",
+        "exec",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--config",
+        'model_reasoning_effort="low"',
+        "--sandbox",
+        "read-only",
+        "--skip-git-repo-check",
+        "--ignore-rules",
+        "--cd",
+        str(work_dir),
+        "--output-schema",
+        str(schema_path),
+        "--output-last-message",
+        str(response_path),
+        "-",
+    ]
+
+
+def ask_codex(events: list[dict], prior_questions: list[str]) -> tuple[dict, int]:
     transcript = "\n".join(
         f"[{timestamp(event['source_audio_ms'])}] {event['text']}" for event in events
     )
@@ -43,19 +66,26 @@ Prior questions:
 Transcript evidence:
 {transcript}
 """
-    command = [
-        "claude", "-p", "--safe-mode", "--model", "haiku", "--tools", "", "--no-session-persistence",
-        "--output-format", "json", "--json-schema", json.dumps(SCHEMA, separators=(",", ":")),
-    ]
     started = time.monotonic()
-    result = subprocess.run(command, input=prompt, text=True, capture_output=True, timeout=30)
+    with tempfile.TemporaryDirectory(prefix="record-live-agent-") as temporary:
+        work_dir = Path(temporary)
+        schema_path = work_dir / "response-schema.json"
+        response_path = work_dir / "response.json"
+        schema_path.write_text(json.dumps(SCHEMA, separators=(",", ":")))
+        result = subprocess.run(
+            codex_command(work_dir, schema_path, response_path),
+            input=prompt,
+            text=True,
+            capture_output=True,
+            timeout=90,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "Codex CLI exited unsuccessfully")
+        if not response_path.exists():
+            raise RuntimeError("Codex CLI did not write a response")
+        payload = json.loads(response_path.read_text())
     generation_ms = round((time.monotonic() - started) * 1000)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "Claude exited unsuccessfully")
-    payload = json.loads(result.stdout)
-    if payload.get("is_error"):
-        raise RuntimeError(payload.get("result") or "Claude returned an error")
-    return payload["structured_output"], generation_ms
+    return payload, generation_ms
 
 
 def event_age_ms(created_at: str) -> int:
@@ -69,7 +99,7 @@ def main() -> None:
     parser.add_argument("--done", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--interval-ms", type=int, default=30_000)
-    parser.add_argument("--context-ms", type=int, default=90_000)
+    parser.add_argument("--context-ms", type=int, default=60_000)
     args = parser.parse_args()
 
     if args.output.exists():
@@ -99,7 +129,7 @@ def main() -> None:
                     continue
 
                 evidence = context_window(finals, audio_ms, args.context_ms)
-                response, generation_ms = ask_claude(evidence, prior_questions)
+                response, generation_ms = ask_codex(evidence, prior_questions)
                 question = response["question"].strip()
                 if question:
                     prior_questions.append(question)

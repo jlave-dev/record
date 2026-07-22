@@ -18,6 +18,18 @@ class QuestionConsumerTests(unittest.TestCase):
         ]
         self.assertEqual(question_consumer.context_window(events, 100_000, 60_000), events[1:])
 
+    def test_codex_command_is_ephemeral_read_only_and_schema_constrained(self):
+        command = question_consumer.codex_command(
+            Path("/tmp/work"), Path("/tmp/schema.json"), Path("/tmp/response.json")
+        )
+        self.assertEqual(command[:2], ["codex", "exec"])
+        self.assertIn("--ephemeral", command)
+        self.assertIn("--ignore-user-config", command)
+        self.assertIn('model_reasoning_effort="low"', command)
+        self.assertEqual(command[command.index("--sandbox") + 1], "read-only")
+        self.assertIn("--output-schema", command)
+        self.assertIn("--output-last-message", command)
+
 
 if __name__ == "__main__":
     unittest.main()
