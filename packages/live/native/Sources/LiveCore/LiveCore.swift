@@ -243,11 +243,13 @@ public final class EventLogWriter: @unchecked Sendable {
 public enum EventLogReader {
     public static func read(url: URL, after cursor: Int, includePartials: Bool = false) throws -> [TranscriptEvent] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let data = try Data(contentsOf: url)
+        guard let lastNewline = data.lastIndex(of: 0x0a) else { return [] }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try String(contentsOf: url, encoding: .utf8)
-            .split(separator: "\n")
-            .map { try decoder.decode(TranscriptEvent.self, from: Data($0.utf8)) }
+        return try data[...lastNewline]
+            .split(separator: 0x0a)
+            .map { try decoder.decode(TranscriptEvent.self, from: Data($0)) }
             .filter { $0.cursor > cursor && (includePartials || $0.type != "transcript.partial") }
     }
 }

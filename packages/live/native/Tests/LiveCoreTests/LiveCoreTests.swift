@@ -58,6 +58,10 @@ final class LiveCoreTests: XCTestCase {
         _ = try writer.append(TranscriptEmission(type: "transcript.final", sourceAudioMs: 20, text: "hello", finalReason: "stable_partial"))
         _ = try writer.appendSystem(type: "live.stopped", sourceAudioMs: 20)
         try writer.close()
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("{\"cursor\":".utf8))
+        try handle.close()
         defer { try? FileManager.default.removeItem(at: directory) }
 
         XCTAssertEqual(try EventLogReader.read(url: url, after: 0).map(\.cursor), [2, 3])
