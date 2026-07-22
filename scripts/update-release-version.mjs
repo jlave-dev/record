@@ -38,7 +38,9 @@ async function replace(relativePath, pattern, replacement) {
 
 async function checkVersion(expectedVersion) {
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
+  const releaseConfig = await readFile(path.join(repoRoot, ".releaserc.json"), "utf8");
   assert.match(workflow, /conventional-changelog-conventionalcommits@9\.3\.1/);
+  assert.doesNotMatch(releaseConfig, /"@semantic-release\/git"/);
 
   const checks = [];
   for (const relativePath of [
