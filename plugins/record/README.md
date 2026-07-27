@@ -16,7 +16,7 @@ record plugin install --codex
 record plugin install --claude
 ```
 
-Use `record plugin install` without a flag when both agent CLIs are installed. Record tracks successfully installed hosts and refreshes stale plugins automatically on the first runtime command after a CLI upgrade.
+Use `record plugin install` without a flag when both agent CLIs are installed. Homebrew upgrades refresh installed plugins automatically; restart the agent app to load the new version. The first runtime command also retries any refresh that could not run during the upgrade.
 
 ## Skill Surface
 

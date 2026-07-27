@@ -111,6 +111,15 @@ grep -qx 'claude plugin install record@record-cli --scope user' "$log"
 printf '0.0.0\n' > "$plugin_state_dir/codex.version"
 printf '0.0.0\n' > "$plugin_state_dir/claude.version"
 : > "$log"
+MOCK_RECORD_PLUGINS_INSTALLED=1 run_record plugin refresh 2>/dev/null
+grep -qx 'codex plugin add record@record-cli --json' "$log"
+grep -qx 'claude plugin install record@record-cli --scope user' "$log"
+[[ "$(<"$plugin_state_dir/codex.version")" == "$version" ]]
+[[ "$(<"$plugin_state_dir/claude.version")" == "$version" ]]
+
+printf '0.0.0\n' > "$plugin_state_dir/codex.version"
+printf '0.0.0\n' > "$plugin_state_dir/claude.version"
+: > "$log"
 run_record capture status --json
 if grep -Eq '^(codex plugin add|claude plugin install)' "$log"; then
   echo "removed plugins were reinstalled during refresh" >&2
