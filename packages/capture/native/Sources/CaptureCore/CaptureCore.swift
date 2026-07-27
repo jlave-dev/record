@@ -281,3 +281,17 @@ public func processExists(_ pid: Int32?) -> Bool {
     guard let pid, pid > 0 else { return false }
     return Darwin.kill(pid, 0) == 0 || errno == EPERM
 }
+
+public func waitForProcessExit(
+    _ pid: Int32?,
+    timeout: TimeInterval,
+    pollInterval: TimeInterval = 0.1,
+    processIsRunning: (Int32?) -> Bool = processExists
+) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while processIsRunning(pid) {
+        guard Date() < deadline else { return false }
+        Thread.sleep(forTimeInterval: pollInterval)
+    }
+    return true
+}

@@ -123,6 +123,9 @@ struct CaptureCLI {
         if result.status == .failed {
             throw CaptureCoreError.message(result.error ?? "Capture failed while stopping.")
         }
+        guard waitForProcessExit(result.pid, timeout: 15) else {
+            throw CaptureCoreError.message("Capture agent did not exit after finalizing the recording.")
+        }
         printState(result, json: json)
     }
 
