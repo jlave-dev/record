@@ -32,4 +32,15 @@ final class CaptureCoreTests: XCTestCase {
         XCTAssertTrue(isZoomWindowShareMarker(CGRect(x: 1720, y: 45, width: 66, height: 20), inside: CGRect(x: 1710, y: 0, width: 1920, height: 1080)))
         XCTAssertFalse(isZoomWindowShareMarker(CGRect(x: 2500, y: 45, width: 66, height: 20), inside: shareFrame))
     }
+
+    func testWaitsForCaptureAgentToExit() {
+        var checks = 0
+
+        XCTAssertTrue(waitForProcessExit(42, timeout: 1, pollInterval: 0) { _ in
+            checks += 1
+            return checks < 3
+        })
+        XCTAssertEqual(checks, 3)
+        XCTAssertFalse(waitForProcessExit(42, timeout: 0, pollInterval: 0) { _ in true })
+    }
 }
