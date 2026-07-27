@@ -22,7 +22,7 @@ Usage: record <command> [options]
   record live <start|status|next|stop|setup|doctor> [options]
   record doctor
   record setup
-  record plugin install [--codex|--claude]
+  record plugin <install [--codex|--claude]|refresh>
   record --version
 USAGE
 }
@@ -220,8 +220,20 @@ case "$command_name" in
     run_setup
     ;;
   plugin)
-    [[ "${1:-}" == "install" && $# -le 2 ]] || { echo "Usage: record plugin install [--codex|--claude]" >&2; exit 2; }
-    install_plugin "${2:-all}"
+    case "${1:-}" in
+      install)
+        [[ $# -le 2 ]] || { echo "Usage: record plugin install [--codex|--claude]" >&2; exit 2; }
+        install_plugin "${2:-all}"
+        ;;
+      refresh)
+        [[ $# -eq 1 ]] || { echo "Usage: record plugin refresh" >&2; exit 2; }
+        refresh_installed_plugins
+        ;;
+      *)
+        echo "Usage: record plugin <install [--codex|--claude]|refresh>" >&2
+        exit 2
+        ;;
+    esac
     ;;
   --version|-V)
     [[ $# -eq 0 ]] || { echo "record --version does not accept arguments." >&2; exit 2; }
