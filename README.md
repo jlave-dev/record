@@ -90,6 +90,8 @@ Successful runs write:
 - `transcript.json`
 - `metadata.json`
 
+Existing transcript or metadata filenames are never overwritten. If writing the final artifacts fails, partial results are retained and the error reports any source move that already completed. Inspect that directory and use a new output directory when retrying.
+
 Defaults:
 
 - Engine: `whisper-cli`.
