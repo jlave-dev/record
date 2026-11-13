@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { constants, linkSync, lstatSync, renameSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -376,13 +376,26 @@ function prepareSourceAction(inputPath: string, outputDir: string, copySource: b
     return {
       action: "copied",
       destination,
-      apply: () => copyFileSync(inputPath, destination)
+      apply: () => copyFileSync(inputPath, destination, constants.COPYFILE_EXCL)
     };
   }
   return {
     action: "moved",
     destination,
-    apply: () => renameSync(inputPath, destination)
+    apply: () => {
+      try {
+        linkSync(inputPath, destination);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+        copyFileSync(inputPath, destination, constants.COPYFILE_EXCL);
+      }
+      try {
+        rmSync(inputPath);
+      } catch (error) {
+        rmSync(destination);
+        throw error;
+      }
+    }
   };
 }
 
@@ -390,22 +403,27 @@ function extractAudio(inputPath: string, outputDir: string): string {
   const tempRoot = join(tmpdir(), "transcribe-audio-");
   const tempDir = mkdtempSync(tempRoot);
   const audioPath = join(tempDir, "audio.wav");
-  const result = run("ffmpeg", [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-y",
-    "-i",
-    inputPath,
-    "-vn",
-    "-ac",
-    "1",
-    "-ar",
-    "16000",
-    audioPath
-  ], { cwd: outputDir });
-  if (result.status !== 0) {
-    fail(`ffmpeg could not extract audio: ${result.stderr.trim() || result.stdout.trim() || "unknown error"}`);
+  try {
+    const result = run("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-i",
+      inputPath,
+      "-vn",
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      audioPath
+    ], { cwd: outputDir });
+    if (result.status !== 0) {
+      fail(`ffmpeg could not extract audio: ${result.stderr.trim() || result.stdout.trim() || "unknown error"}`);
+    }
+  } catch (error) {
+    removeTempAudio(audioPath);
+    throw error;
   }
   return audioPath;
 }
@@ -435,7 +453,7 @@ function runWhisper(config: TranscribeConfig, audioPath: string, outputBase: str
   return { stdout: result.stdout, stderr: result.stderr };
 }
 
-function readWhisperOutputs(textPath: string, jsonPath: string, stdout: string): { text: string; raw?: unknown; segments: TranscriptSegment[] } {
+function readWhisperOutputs(textPath: string, jsonPath: string): { text: string; raw?: unknown; segments: TranscriptSegment[] } {
   let raw: unknown;
   if (existsSync(jsonPath)) {
     try {
@@ -448,7 +466,7 @@ function readWhisperOutputs(textPath: string, jsonPath: string, stdout: string):
   const segments = raw ? extractSegments(raw) : [];
   const textFromJson = raw ? textFromRaw(raw) : "";
   const textFromFile = existsSync(textPath) ? readFileSync(textPath, "utf8").trim() : "";
-  const text = (textFromJson || textFromFile || stdout.trim()).trim();
+  const text = (textFromJson || textFromFile).trim();
   if (!text) fail("Whisper finished but produced no usable transcript.");
   return { text, raw, segments };
 }
@@ -475,13 +493,26 @@ async function commandTranscribe(options: { input?: string; output?: string; cop
   const textPath = join(outputDir, "transcript.txt");
   const transcriptJsonPath = join(outputDir, "transcript.json");
   const metadataPath = join(outputDir, "metadata.json");
-  const whisperOutputBase = join(outputDir, "transcript");
-  const audioPath = extractAudio(inputPath, outputDir);
+  const artifactPaths = [textPath, transcriptJsonPath, metadataPath];
+  for (const path of artifactPaths) {
+    try {
+      lstatSync(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    fail(`Refusing to overwrite existing artifact: ${path}. Choose a new output directory.`);
+  }
+  const stagingDir = mkdtempSync(join(outputDir, ".transcribe-"));
+  const stagedText = join(stagingDir, "transcript.txt");
+  const stagedJson = join(stagingDir, "transcript.json");
+  let audioPath: string | undefined;
   let tempRemoved = false;
 
   try {
-    const whisperResult = runWhisper(config, audioPath, whisperOutputBase);
-    const outputs = readWhisperOutputs(textPath, transcriptJsonPath, whisperResult.stdout);
+    audioPath = extractAudio(inputPath, outputDir);
+    runWhisper(config, audioPath, join(stagingDir, "transcript"));
+    const outputs = readWhisperOutputs(stagedText, stagedJson);
     const transcript: TranscriptJson = {
       schema_version: 1,
       artifact_type: "transcript",
@@ -493,9 +524,8 @@ async function commandTranscribe(options: { input?: string; output?: string; cop
       raw: outputs.raw
     };
 
-    writeFileSync(textPath, textFileFromSegments(outputs.segments, outputs.text));
-    writeJson(transcriptJsonPath, transcript);
-    sourcePlan.apply();
+    writeFileSync(stagedText, textFileFromSegments(outputs.segments, outputs.text));
+    writeJson(stagedJson, transcript);
 
     tempRemoved = removeTempAudio(audioPath);
     const metadata: Metadata = {
@@ -519,7 +549,21 @@ async function commandTranscribe(options: { input?: string; output?: string; cop
         co_located_source_file: sourcePlan.destination
       }
     };
-    writeJson(metadataPath, metadata);
+    writeJson(join(stagingDir, "metadata.json"), metadata);
+
+    // Publish only fresh, validated outputs. Hard links fail on collisions,
+    // including files created by another run after the initial check.
+    const published: string[] = [];
+    try {
+      for (const path of artifactPaths) {
+        linkSync(join(stagingDir, basename(path)), path);
+        published.push(path);
+      }
+      sourcePlan.apply();
+    } catch (error) {
+      for (const path of published) rmSync(path);
+      throw error;
+    }
 
     const payload = {
       output_dir: outputDir,
@@ -534,7 +578,8 @@ async function commandTranscribe(options: { input?: string; output?: string; cop
       if (sourcePlan.destination) printHuman(`Source: ${sourcePlan.destination}`);
     }
   } finally {
-    if (!tempRemoved && existsSync(audioPath)) removeTempAudio(audioPath);
+    if (audioPath && !tempRemoved) removeTempAudio(audioPath);
+    rmSync(stagingDir, { recursive: true, force: true });
   }
 }
 

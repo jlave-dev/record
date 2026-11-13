@@ -16,7 +16,7 @@
     "doctor": "node dist/index.js doctor",
     "install:local": "../../scripts/install-local.sh \"$PWD\" transcribe",
     "setup": "npm run build && node dist/index.js setup && npm run install:local && node dist/index.js doctor",
-    "test": "npm run build && ./scripts/test-setup.sh"
+    "test": "npm run build && ./scripts/test-setup.sh && node --test scripts/test-artifacts.mjs"
   },
   "dependencies": {
     "commander": "^12.1.0"
