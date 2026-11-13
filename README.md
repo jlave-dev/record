@@ -146,7 +146,7 @@ The live skills poll the same cursor API and require timestamp grounding, final-
 
 Development requirements:
 
-- Node.js 22 or newer.
+- Node.js 22.14 or newer within the 22.x line, or 24.10 or newer.
 - Bun for the self-contained transcription build.
 - Xcode Command Line Tools.
 - Homebrew with `ffmpeg` and `whisper-cpp` for live transcription tests.

@@ -27,7 +27,7 @@
     "release:dry-run": "semantic-release --dry-run --no-ci"
   },
   "engines": {
-    "node": ">=22"
+    "node": "^22.14.0 || >=24.10.0"
   },
   "devDependencies": {
     "@semantic-release/commit-analyzer": "13.0.1",
