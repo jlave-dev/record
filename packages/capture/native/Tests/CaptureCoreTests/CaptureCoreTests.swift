@@ -44,3 +44,48 @@ final class CaptureCoreTests: XCTestCase {
         XCTAssertFalse(waitForProcessExit(42, timeout: 0, pollInterval: 0) { _ in true })
     }
 }
+
+final class CaptureLockTests: XCTestCase {
+    func testConcurrentReservationIsRejectedAndReleaseAllowsRetry() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("session.lock")
+        let first = try CaptureLock(url: url)
+        XCTAssertThrowsError(try CaptureLock(url: url))
+        first.release()
+        let retry = try CaptureLock(url: url)
+        XCTAssertThrowsError(try CaptureLock(url: url))
+        retry.release()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testStartupLockRemainsHeldDuringAgentHandoff() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let commandURL = directory.appendingPathComponent("command.lock")
+        let sessionURL = directory.appendingPathComponent("session.lock")
+        let command = try CaptureLock(url: commandURL)
+        let reservation = try CaptureLock(url: sessionURL)
+        reservation.release()
+        XCTAssertThrowsError(try CaptureLock(url: commandURL))
+        let agent = try CaptureLock(url: sessionURL)
+        command.release()
+        let nextCommand = try CaptureLock(url: commandURL)
+        XCTAssertThrowsError(try CaptureLock(url: sessionURL))
+        nextCommand.release()
+        agent.release()
+    }
+
+    func testScopeExitReleasesLockWithoutDeletingItsFile() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let lock = try CaptureLock(url: url)
+            try withExtendedLifetime(lock) { XCTAssertThrowsError(try CaptureLock(url: url)) }
+        }
+        let retry = try CaptureLock(url: url)
+        retry.release()
+    }
+}

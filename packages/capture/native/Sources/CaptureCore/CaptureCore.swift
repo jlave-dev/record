@@ -142,11 +142,45 @@ public enum CaptureCoreError: LocalizedError {
     }
 }
 
+// Keep the lock file in place: unlinking it lets another process lock a
+// different inode. The kernel releases the lock if its owner exits or crashes.
+public final class CaptureLock {
+    private var descriptor: Int32
+
+    public init(url: URL) throws {
+        descriptor = Darwin.open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else {
+            throw CaptureCoreError.message("Could not open capture lock: \(String(cString: strerror(errno)))")
+        }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let code = errno
+            Darwin.close(descriptor)
+            descriptor = -1
+            if code == EWOULDBLOCK {
+                throw CaptureCoreError.message("A capture or capture command is already active. Wait for it to finish.")
+            }
+            throw CaptureCoreError.message("Could not lock capture: \(String(cString: strerror(code)))")
+        }
+    }
+
+    public func release() {
+        guard descriptor >= 0 else { return }
+        _ = flock(descriptor, LOCK_UN)
+        Darwin.close(descriptor)
+        descriptor = -1
+    }
+
+    deinit { release() }
+}
+
 public enum CapturePaths {
     public static var controlDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".local/share/capture-native", isDirectory: true)
     }
+
+    public static var commandLock: URL { controlDir.appendingPathComponent("command.lock") }
+    public static var sessionLock: URL { controlDir.appendingPathComponent("session.lock") }
 
     public static var state: URL { controlDir.appendingPathComponent("state.json") }
     public static var stop: URL { controlDir.appendingPathComponent("stop") }

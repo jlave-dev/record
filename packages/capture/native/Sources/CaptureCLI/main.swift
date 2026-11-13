@@ -59,6 +59,10 @@ struct CaptureCLI {
         }
 
         try CapturePaths.ensureControlDir()
+        let commandLock = try CaptureLock(url: CapturePaths.commandLock)
+        defer { commandLock.release() }
+        let reservation = try CaptureLock(url: CapturePaths.sessionLock)
+        defer { reservation.release() }
         if var oldState = try? readJSON(CaptureState.self, from: CapturePaths.state), oldState.status.isActive {
             if processExists(oldState.pid) {
                 throw CaptureCoreError.message("A capture is already active for \(oldState.appName ?? oldState.requestedApp).")
@@ -92,12 +96,15 @@ struct CaptureCLI {
         let requestURL = CapturePaths.request(token: token)
         let request = CaptureRequest(action: .start, token: token, app: app, outputDir: outputDir.path, width: width, height: height, liveWorkerPath: liveWorkerPath, liveEventsPath: liveEventsPath)
         var state = CaptureState(token: token, status: .starting, requestedApp: app, outputDir: outputDir.path, outputPath: outputPath.path, metadataPath: metadataPath.path)
+        // Status checks must not mistake the agent launch window for a dead session.
+        state.pid = getpid()
         state.liveEventsPath = liveEventsPath
         state.liveStatus = liveEventsPath == nil ? nil : .starting
 
         try? FileManager.default.removeItem(at: CapturePaths.stop)
         try writeJSON(request, to: requestURL)
         try writeJSON(state, to: CapturePaths.state)
+        reservation.release() // The agent takes over this lock; commandLock guards the handoff.
         try launchAgent(requestPath: requestURL)
 
         let result = try waitForState(token: token, timeout: liveWorkerPath == nil ? 60 : 240) { $0.status == .recording || $0.status == .failed }
@@ -108,6 +115,9 @@ struct CaptureCLI {
     }
 
     static func stop(json: Bool) throws {
+        try CapturePaths.ensureControlDir()
+        let commandLock = try CaptureLock(url: CapturePaths.commandLock)
+        defer { commandLock.release() }
         guard var state = try? readJSON(CaptureState.self, from: CapturePaths.state), state.status.isActive else {
             throw CaptureCoreError.message("No capture is currently active.")
         }
@@ -130,11 +140,14 @@ struct CaptureCLI {
     }
 
     static func status(json: Bool) throws {
+        try CapturePaths.ensureControlDir()
+        let commandLock = try? CaptureLock(url: CapturePaths.commandLock)
+        defer { commandLock?.release() }
         guard var state = try? readJSON(CaptureState.self, from: CapturePaths.state) else {
             if json { printJSON(["active": false]) } else { print("Capture inactive.") }
             return
         }
-        if state.status.isActive && !processExists(state.pid) {
+        if commandLock != nil && state.status.isActive && !processExists(state.pid) {
             state.status = .failed
             state.error = "Capture agent exited without finalizing the recording."
             try writeJSON(state, to: CapturePaths.state)

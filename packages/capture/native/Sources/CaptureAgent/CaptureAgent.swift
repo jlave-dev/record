@@ -290,7 +290,9 @@ struct CaptureAgent {
                     try? data.write(to: URL(fileURLWithPath: responsePath), options: [.atomic])
                 }
             }
-            if request?.action == .start, let state = try? readJSON(CaptureState.self, from: CapturePaths.state) {
+            if request?.action == .start,
+               let state = try? readJSON(CaptureState.self, from: CapturePaths.state),
+               state.token == request?.token, state.pid == getpid() {
                 var failed = state
                 failed.status = .failed
                 failed.pid = Int32(ProcessInfo.processInfo.processIdentifier)
@@ -303,6 +305,14 @@ struct CaptureAgent {
     }
 
     static func record(_ request: CaptureRequest) async throws {
+        try CapturePaths.ensureControlDir()
+        let sessionLock = try CaptureLock(url: CapturePaths.sessionLock)
+        defer { sessionLock.release() }
+        // A delayed launch must not replace a newer session's reservation.
+        let reserved = try readJSON(CaptureState.self, from: CapturePaths.state)
+        guard reserved.token == request.token, reserved.status == .starting else {
+            throw CaptureCoreError.message("Capture start request is no longer current.")
+        }
         guard let requestedApp = request.app, let outputDir = request.outputDir else {
             throw CaptureCoreError.message("Start request is missing app or output directory.")
         }
