@@ -243,14 +243,46 @@ public final class EventLogWriter: @unchecked Sendable {
 public enum EventLogReader {
     public static func read(url: URL, after cursor: Int, includePartials: Bool = false) throws -> [TranscriptEvent] {
         guard FileManager.default.fileExists(atPath: url.path) else { return [] }
-        let data = try Data(contentsOf: url)
-        guard let lastNewline = data.lastIndex(of: 0x0a) else { return [] }
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var offset = try handle.seekToEnd()
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try data[...lastNewline]
-            .split(separator: 0x0a)
-            .map { try decoder.decode(TranscriptEvent.self, from: Data($0)) }
-            .filter { $0.cursor > cursor && (includePartials || $0.type != "transcript.partial") }
+        var events: [TranscriptEvent] = []
+        var pending = Data()
+        var foundNewline = false
+
+        func consume(_ line: Data) throws -> Bool {
+            guard !line.isEmpty else { return false }
+            let event = try decoder.decode(TranscriptEvent.self, from: line)
+            if event.cursor <= cursor { return true }
+            if includePartials || event.type != "transcript.partial" { events.append(event) }
+            return false
+        }
+
+        // Cursors increase with each append. Scan backward to the requested
+        // cursor so caught-up clients do not decode the whole meeting again.
+        while offset > 0 {
+            let count = Int(min(offset, 65_536))
+            offset -= UInt64(count)
+            try handle.seek(toOffset: offset)
+            var chunk = try handle.read(upToCount: count) ?? Data()
+            guard chunk.count == count else { throw LiveError("transcript event log changed while reading") }
+            chunk.append(pending)
+            var end = chunk.endIndex
+            for index in chunk.indices.reversed() where chunk[index] == 0x0a {
+                if foundNewline {
+                    if try consume(Data(chunk[(index + 1)..<end])) { return events.reversed() }
+                } else {
+                    // Ignore an unfinished final line until its newline arrives.
+                    foundNewline = true
+                }
+                end = index
+            }
+            pending = foundNewline ? Data(chunk[..<end]) : Data()
+        }
+        if foundNewline { _ = try consume(pending) }
+        return events.reversed()
     }
 }
 

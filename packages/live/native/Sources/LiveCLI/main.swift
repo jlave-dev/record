@@ -1,5 +1,6 @@
 import Foundation
 import LiveCore
+import Darwin
 
 @main
 struct LiveCLI {
@@ -63,25 +64,30 @@ struct LiveCLI {
             throw LiveError("live next requires --after CURSOR")
         }
         let timeoutValue = takeOption("--timeout", from: &arguments) ?? "30"
-        guard let timeout = Double(timeoutValue), timeout >= 0 else {
+        guard let timeout = Double(timeoutValue), timeout.isFinite, timeout >= 0 else {
             throw LiveError("--timeout requires non-negative seconds")
         }
         _ = takeFlag("--json", from: &arguments)
         guard arguments.isEmpty else { throw LiveError("unknown live next argument: \(arguments[0])") }
 
-        let state = try captureState()
+        var state = try captureState()
         guard let eventsPath = state.liveEventsPath else { throw LiveError("no live transcript is available") }
         let eventsURL = URL(fileURLWithPath: eventsPath)
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(timeout))
         var events: [TranscriptEvent] = []
-        repeat {
+        var terminal = false
+        while true {
+            let stateTerminal = state.liveEventsPath != eventsPath || state.isTerminal
             events = try EventLogReader.read(url: eventsURL, after: after)
-            if !events.isEmpty { break }
-            if Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
-        } while Date() < deadline
+            terminal = stateTerminal || events.contains {
+                $0.type == "live.stopped" || $0.type == "live.failed"
+            }
+            if !events.isEmpty || terminal || ContinuousClock.now >= deadline { break }
+            Thread.sleep(forTimeInterval: 0.2)
+            state = try captureState()
+        }
 
         let nextCursor = events.last?.cursor ?? after
-        let terminal = state.liveStatus == "stopped" || state.liveStatus == "failed" || events.contains { $0.type == "live.stopped" || $0.type == "live.failed" }
         printJSON(NextPayload(events: events, nextCursor: nextCursor, terminal: terminal))
     }
 
@@ -214,6 +220,15 @@ struct LiveCLI {
 private struct CaptureStatePayload: Decodable {
     let liveEventsPath: String?
     let liveStatus: String?
+    let status: String?
+    let liveWorkerPID: Int32?
+
+    var isTerminal: Bool {
+        if liveStatus == "stopped" || status == "stopped" || status == "failed" { return true }
+        // A forwarding failure can precede the worker flushing its buffered speech.
+        guard liveStatus == "failed", let pid = liveWorkerPID, pid > 0 else { return false }
+        return Darwin.kill(pid, 0) != 0 && errno == ESRCH
+    }
 }
 
 private struct NextPayload: Encodable {
