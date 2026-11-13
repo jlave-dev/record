@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "build": "./scripts/build.sh",
-    "test": "swift test --package-path native",
+    "test": "swift test --package-path native && node --test scripts/test-next.mjs",
     "test:prerecorded": "./scripts/test-prerecorded.sh"
   },
   "engines": {
