@@ -91,7 +91,7 @@ struct LiveCLI {
         guard arguments.isEmpty else { throw LiveError("live doctor does not accept that argument") }
         let capture = captureExecutable()
         let worker = try workerExecutable()
-        let workerResult = run(worker, ["doctor"])
+        let workerResult = runProcess(worker, ["doctor"])
         let checks = [
             Check(name: "capture_runtime", ok: FileManager.default.isExecutableFile(atPath: capture.path), details: capture.path),
             Check(name: "live_worker", ok: workerResult.status == 0, details: workerResult.status == 0 ? "FluidAudio model is ready." : workerResult.stderr),
@@ -112,21 +112,21 @@ struct LiveCLI {
         guard FileManager.default.isExecutableFile(atPath: capture.path) else {
             throw LiveError("capture runtime was not found at \(capture.path)")
         }
-        guard run(capture, ["doctor", "--json"]).status != 0 else { return }
+        guard runProcess(capture, ["doctor", "--json"]).status != 0 else { return }
         FileHandle.standardError.write(Data("Screen & System Audio Recording permission is required. Approve the macOS prompt; if System Settings opens, enable CaptureAgent and rerun this command.\n".utf8))
-        let setup = run(capture, ["setup", "--json"])
-        guard setup.status == 0, run(capture, ["doctor", "--json"]).status == 0 else {
+        let setup = runProcess(capture, ["setup", "--json"])
+        guard setup.status == 0, runProcess(capture, ["doctor", "--json"]).status == 0 else {
             throw LiveError("CaptureAgent permission is still disabled. Enable it in System Settings > Privacy & Security > Screen & System Audio Recording, then retry.")
         }
     }
 
     private static func ensureWorkerReady(_ worker: URL) throws {
-        guard run(worker, ["doctor"]).status != 0 else { return }
+        guard runProcess(worker, ["doctor"]).status != 0 else { return }
         try runAndForward(worker, ["setup"])
     }
 
     private static func captureState() throws -> CaptureStatePayload {
-        let result = run(captureExecutable(), ["status", "--json"])
+        let result = runProcess(captureExecutable(), ["status", "--json"])
         guard result.status == 0 else { throw LiveError(result.stderr) }
         guard let state = try? JSONDecoder().decode(CaptureStatePayload.self, from: result.stdoutData) else {
             throw LiveError("no live capture state is available")
@@ -163,25 +163,6 @@ struct LiveCLI {
         try process.run()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw LiveError("live command failed") }
-    }
-
-    private static func run(_ executable: URL, _ arguments: [String]) -> ProcessResult {
-        let process = Process()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.standardOutput = stdout
-        process.standardError = stderr
-        do { try process.run() } catch {
-            return ProcessResult(status: 127, stdoutData: Data(), stderr: error.localizedDescription)
-        }
-        process.waitUntilExit()
-        return ProcessResult(
-            status: process.terminationStatus,
-            stdoutData: stdout.fileHandleForReading.readDataToEndOfFile(),
-            stderr: String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        )
     }
 
     private static func takeFlag(_ name: String, from arguments: inout [String]) -> Bool {
@@ -252,8 +233,3 @@ private struct DoctorPayload: Encodable {
     let checks: [Check]
 }
 
-private struct ProcessResult {
-    let status: Int32
-    let stdoutData: Data
-    let stderr: String
-}
