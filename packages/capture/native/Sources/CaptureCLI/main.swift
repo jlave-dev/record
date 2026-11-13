@@ -107,10 +107,7 @@ struct CaptureCLI {
         reservation.release() // The agent takes over this lock; commandLock guards the handoff.
         try launchAgent(requestPath: requestURL)
 
-        let result = try waitForState(token: token, timeout: liveWorkerPath == nil ? 60 : 240) { $0.status == .recording || $0.status == .failed }
-        if result.status == .failed {
-            throw CaptureCoreError.message(result.error ?? "Capture failed to start.")
-        }
+        let result = try waitForStart(token: token, starterPID: getpid(), commandLock: commandLock, timeout: liveWorkerPath == nil ? 60 : 240)
         printState(result, json: json)
     }
 
@@ -205,13 +202,32 @@ struct CaptureCLI {
         }
     }
 
-    static func waitForState(token: String, timeout: TimeInterval, predicate: (CaptureState) -> Bool) throws -> CaptureState {
+    static func waitForStart(token: String, starterPID: Int32, commandLock: CaptureLock, timeout: TimeInterval, pollInterval: TimeInterval = 0.1, readState: () -> CaptureState? = { try? readJSON(CaptureState.self, from: CapturePaths.state) }) throws -> CaptureState {
+        let result = try waitForState(token: token, timeout: timeout, pollInterval: pollInterval, readState: readState) { state in
+            // Once the agent publishes its PID, it owns the session lock and
+            // stop can safely queue a request while startup continues.
+            if let pid = state.pid, pid != starterPID { commandLock.release() }
+            return state.status == .recording || state.status == .failed || state.status == .stopped
+        }
+        if result.status == .failed {
+            throw CaptureCoreError.message(result.error ?? "Capture failed to start.")
+        }
+        if result.status == .stopped {
+            throw CaptureCoreError.message("Capture was stopped before startup completed.")
+        }
+        return result
+    }
+
+    static func waitForState(token: String, timeout: TimeInterval, pollInterval: TimeInterval = 0.1, readState: () -> CaptureState? = { try? readJSON(CaptureState.self, from: CapturePaths.state) }, predicate: (CaptureState) -> Bool) throws -> CaptureState {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if let state = try? readJSON(CaptureState.self, from: CapturePaths.state), state.token == token, predicate(state) {
-                return state
+            if let state = readState() {
+                guard state.token == token else {
+                    throw CaptureCoreError.message("Capture session was replaced while waiting for the agent.")
+                }
+                if predicate(state) { return state }
             }
-            Thread.sleep(forTimeInterval: 0.1)
+            Thread.sleep(forTimeInterval: pollInterval)
         }
         throw CaptureCoreError.message("Timed out waiting for the capture agent.")
     }
