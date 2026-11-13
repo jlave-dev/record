@@ -73,6 +73,8 @@ private final class LiveWorkerProcess {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = logHandle
         try process.run()
+        // Only the worker should own the read end, so its exit breaks writes.
+        try input.fileHandleForReading.close()
     }
 
     var processIdentifier: Int32 { process.processIdentifier }
@@ -97,7 +99,7 @@ private final class LiveWorkerProcess {
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
         if process.isRunning {
-            process.terminate()
+            cancel()
             throw CaptureCoreError.message("Live transcription worker did not stop after its audio stream ended.")
         }
         try? logHandle.close()
@@ -108,7 +110,13 @@ private final class LiveWorkerProcess {
 
     func cancel() {
         try? input.fileHandleForWriting.close()
-        if process.isRunning { process.terminate() }
+        if process.isRunning {
+            process.terminate()
+            let deadline = ContinuousClock.now.advanced(by: .milliseconds(500))
+            while process.isRunning && ContinuousClock.now < deadline { Thread.sleep(forTimeInterval: 0.01) }
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            process.waitUntilExit()
+        }
         try? logHandle.close()
         try? FileManager.default.removeItem(at: readyURL)
     }
@@ -121,7 +129,7 @@ private final class LiveAudioForwarder: NSObject, SCStreamOutput {
         let error: String?
     }
 
-    private let input: FileHandle
+    private let writer: AudioPipeWriter
     private let outputFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
     private let writerQueue = DispatchQueue(label: "dev.record.live-audio-writer")
     private let pending = DispatchSemaphore(value: 16)
@@ -134,14 +142,13 @@ private final class LiveAudioForwarder: NSObject, SCStreamOutput {
     private var dropped = 0
     private var failure: String?
 
-    init(input: FileHandle) {
-        self.input = input
+    init(input: FileHandle) throws {
+        writer = try AudioPipeWriter(handle: input)
         super.init()
-        _ = fcntl(input.fileDescriptor, F_SETNOSIGPIPE, 1)
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
-        guard outputType == .audio, CMSampleBufferDataIsReady(sampleBuffer) else { return }
+        guard outputType == .audio, CMSampleBufferDataIsReady(sampleBuffer), snapshot().error == nil else { return }
         do {
             let frame = try encodedFrame(from: sampleBuffer)
             guard pending.wait(timeout: .now()) == .success else {
@@ -155,7 +162,11 @@ private final class LiveAudioForwarder: NSObject, SCStreamOutput {
                     writes.leave()
                 }
                 do {
-                    try input.write(contentsOf: frame)
+                    guard snapshot().error == nil else {
+                        lock.withLock { dropped += 1 }
+                        return
+                    }
+                    try writer.write(frame)
                     lock.withLock { delivered += 1 }
                 } catch {
                     lock.withLock {
@@ -173,7 +184,9 @@ private final class LiveAudioForwarder: NSObject, SCStreamOutput {
     }
 
     func finish() -> Snapshot {
-        writes.wait()
+        if writes.wait(timeout: .now() + 5) == .timedOut {
+            lock.withLock { if failure == nil { failure = "Timed out draining live audio." } }
+        }
         return snapshot()
     }
 
@@ -432,7 +445,7 @@ struct CaptureAgent {
             try writeJSON(state, to: CapturePaths.state)
             do {
                 try worker.waitUntilReady(timeout: 180)
-                let forwarder = LiveAudioForwarder(input: worker.input.fileHandleForWriting)
+                let forwarder = try LiveAudioForwarder(input: worker.input.fileHandleForWriting)
                 if let audioStream {
                     try audioStream.addStreamOutput(forwarder, type: .audio, sampleHandlerQueue: liveAudioQueue)
                 } else {
@@ -503,6 +516,9 @@ struct CaptureAgent {
                     if let failure = snapshot.error {
                         state.liveStatus = .failed
                         state.liveError = failure
+                    } else if let liveWorker, !liveWorker.process.isRunning {
+                        state.liveStatus = .failed
+                        state.liveError = "Live transcription worker exited. See live-worker.log."
                     }
                     try writeJSON(state, to: CapturePaths.state)
                 }
