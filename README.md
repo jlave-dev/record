@@ -72,6 +72,7 @@ Defaults:
 
 The target app must be running with a visible shareable window when capture starts. App values may be friendly aliases, app names, bundle identifiers, or `.app` paths.
 When Zoom shares local content, capture automatically follows the shared window or display with audio and returns to the Zoom windows when sharing stops.
+Zoom video keeps one writer open across those source and crop changes, including static shared screens. If capture fails, it reports an incomplete recording and retains the separate `.zoom-audio.mp4` file when available for recovery.
 
 ## Transcribe
 
@@ -172,6 +173,12 @@ npm --workspace transcribe run transcribe -- --help
 npm --workspace live run build
 npm --workspace live run test:prerecorded -- /path/to/meeting.mp4 30
 ```
+
+Run capture regression tests with `npm --workspace capture test`. With screen
+recording permission, `CAPTURE_INTEGRATION=1 npm --workspace capture test` also
+opens a synthetic test window, reproduces the native recording stop on a stream
+configuration change, and verifies continuous video and audio merging across
+repeated source and crop changes.
 
 ## Release
 

@@ -13,7 +13,7 @@ let package = Package(
         .target(name: "CaptureCore"),
         .executableTarget(name: "CaptureCLI", dependencies: ["CaptureCore"]),
         .executableTarget(name: "CaptureAgent", dependencies: ["CaptureCore"]),
-        .testTarget(name: "CaptureCoreTests", dependencies: ["CaptureCore"])
+        .testTarget(name: "CaptureCoreTests", dependencies: ["CaptureCore", "CaptureAgent"])
     ],
     swiftLanguageVersions: [.v5]
 )
