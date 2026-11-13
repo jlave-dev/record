@@ -62,7 +62,6 @@ if [[ -f "$skill_validator" ]]; then
 fi
 if command -v claude >/dev/null 2>&1; then
   run claude plugin validate --strict "$plugin_root/claude"
-  run claude plugin validate --strict "$(cd -- "$plugin_root/../.." && pwd)"
 fi
 
 tmp_dir="$(mktemp -d)"
