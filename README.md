@@ -131,7 +131,9 @@ If both CLIs are installed, install both together:
 record plugin install
 ```
 
-Record remembers only successfully installed hosts. After a Homebrew upgrade, the first `capture`, `transcribe`, `live`, `doctor`, or `setup` command refreshes stale Record plugins automatically. A plugin removed through its agent CLI is not reinstalled.
+After a Homebrew upgrade, the first `capture`, `transcribe`, `live`, `doctor`, or `setup` command refreshes stale Record plugins automatically. Run `record plugin refresh` to refresh before starting an agent session, then restart the agent app. Homebrew itself does not modify per-user agent settings.
+
+Failed or interrupted installs remain pending and retry on the next runtime command. A refresh failure warns without blocking recording or transcription; an explicit `record plugin refresh` returns a nonzero exit code on failure. Successfully refreshed hosts are skipped on retries. A plugin removed through its agent CLI is not reinstalled unless an unfinished install is pending.
 
 Then start a new Codex task or Claude Code session. Both plugins expose the same three skills:
 

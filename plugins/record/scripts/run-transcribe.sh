@@ -26,11 +26,12 @@ require_record() {
 run_transcribe() {
   if record transcribe "$@"; then
     return 0
+  else
+    local exit_code=$?
   fi
-  local status=$?
   echo "transcribe failed." >&2
   echo "Next: run \`record transcribe doctor --json\`; if the model is missing, run \`record transcribe setup\`." >&2
-  exit "$status"
+  exit "$exit_code"
 }
 
 input_path=""

@@ -41,8 +41,9 @@ run_capture() {
   shift
   if record capture "$@"; then
     return 0
+  else
+    local exit_code=$?
   fi
-  local status=$?
 
   case "$context" in
     start)
@@ -63,7 +64,7 @@ run_capture() {
       ;;
   esac
 
-  exit "$status"
+  exit "$exit_code"
 }
 
 if [[ $# -lt 1 ]]; then
