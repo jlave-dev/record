@@ -33,7 +33,6 @@ python3 "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" pl
 python3 "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" plugins/record/skills/live
 python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/record
 claude plugin validate --strict plugins/record/claude
-claude plugin validate --strict .
 npm run test:record
 plugins/record/scripts/smoke-test.sh
 plugins/record/scripts/test-live-adapters.sh

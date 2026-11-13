@@ -118,7 +118,7 @@ On first use, `start` checks Screen & System Audio Recording permission, opens t
 
 ## Agent Plugins
 
-The repository contains marketplaces for Codex at `.agents/plugins/marketplace.json` and Claude Code at `.claude-plugin/marketplace.json`. The Homebrew release carries matching local marketplaces.
+Homebrew releases bundle the Codex and Claude Code marketplaces from `packaging/marketplace`. Plugin source lives in `plugins/record`.
 
 The corresponding agent CLI must already be on `PATH`. Install one plugin:
 
