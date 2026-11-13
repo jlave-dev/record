@@ -190,13 +190,15 @@ npm run build:release:macos-arm64
 
 This creates `dist/release/record-<version>-macos-arm64.tar.gz`. Local archives use the available development signing identity and are not publishable.
 
-Releases from `main` use semantic-release and Conventional Commits to choose the next version. The macOS arm64 release job then:
+Pull requests run tests, runtime builds, CLI help checks, ShellCheck, actionlint, and formula syntax validation on macOS. The validation workflow has read-only repository permissions and does not require signing credentials.
+
+Releases from `main` use the semantic-release toolchain pinned in `package-lock.json` and Conventional Commits to choose the next version. The macOS arm64 release job then:
 
 1. Updates the workspace, CLI, both plugin manifests, and Formula versions.
 2. Signs CaptureAgent, capture, transcribe, live, and live-worker with Developer ID and hardened runtime.
 3. Notarizes the assembled bundle and staples the CaptureAgent ticket.
 4. Builds the final archive and writes its SHA-256 to `Formula/record.rb`.
-5. Commits the generated versions and Formula checksum with `[skip ci]`.
+5. Keeps generated versions and the Formula checksum in the release workspace; protected `main` is not modified.
 6. Creates the Git tag and GitHub release with the exact Homebrew archive.
 7. Updates `Formula/record.rb` in `jlave-dev/homebrew-tap`.
 

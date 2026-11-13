@@ -33,16 +33,6 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Install semantic-release
-        run: |
-          npm install --no-save \
-            semantic-release \
-            @semantic-release/commit-analyzer \
-            @semantic-release/exec \
-            @semantic-release/github \
-            @semantic-release/release-notes-generator \
-            conventional-changelog-conventionalcommits@9.3.1
-
       - name: Seed the pre-automation release baseline
         run: |
           if ! git tag --list 'v*' | grep -q .; then
@@ -149,7 +139,7 @@ jobs:
           exit 1
 
       - name: Run semantic-release
-        run: npx semantic-release
+        run: npm run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
