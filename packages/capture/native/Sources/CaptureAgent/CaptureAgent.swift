@@ -290,19 +290,40 @@ struct CaptureAgent {
                     try? data.write(to: URL(fileURLWithPath: responsePath), options: [.atomic])
                 }
             }
-            if request?.action == .start, let state = try? readJSON(CaptureState.self, from: CapturePaths.state) {
-                var failed = state
-                failed.status = .failed
-                failed.pid = Int32(ProcessInfo.processInfo.processIdentifier)
-                failed.error = error.localizedDescription
-                try? writeJSON(failed, to: CapturePaths.state)
-            }
             FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
             exit(1)
         }
     }
 
     static func record(_ request: CaptureRequest) async throws {
+        try CapturePaths.ensureControlDir()
+        try await withReservedSession(request, stateURL: CapturePaths.state, lockURL: CapturePaths.sessionLock) {
+            try await recordReserved(request)
+        }
+    }
+
+    static func withReservedSession(_ request: CaptureRequest, stateURL: URL, lockURL: URL, body: () async throws -> Void) async throws {
+        let sessionLock = try CaptureLock(url: lockURL)
+        defer { sessionLock.release() }
+        // A delayed launch must not replace a newer session's reservation.
+        let reserved = try readJSON(CaptureState.self, from: stateURL)
+        guard reserved.token == request.token, reserved.status == .starting else {
+            throw CaptureCoreError.message("Capture start request is no longer current.")
+        }
+        do {
+            try await body()
+        } catch {
+            if var state = try? readJSON(CaptureState.self, from: stateURL), state.token == request.token {
+                state.status = .failed
+                state.pid = Int32(ProcessInfo.processInfo.processIdentifier)
+                state.error = error.localizedDescription
+                try? writeJSON(state, to: stateURL)
+            }
+            throw error
+        }
+    }
+
+    static func recordReserved(_ request: CaptureRequest) async throws {
         guard let requestedApp = request.app, let outputDir = request.outputDir else {
             throw CaptureCoreError.message("Start request is missing app or output directory.")
         }

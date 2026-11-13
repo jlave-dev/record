@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import CaptureCore
 import ScreenCaptureKit
 import XCTest
 @testable import CaptureAgent
@@ -243,5 +244,45 @@ final class RecordingTests: XCTestCase {
         let number = NSNumber(value: status.rawValue)
         CFDictionarySetValue(dictionary, Unmanaged.passUnretained(key).toOpaque(), Unmanaged.passUnretained(number).toOpaque())
         return buffer
+    }
+}
+
+final class CaptureSessionFailureTests: XCTestCase {
+    func testStartupFailureIsPublishedBeforeSessionLockIsReleased() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let stateURL = directory.appendingPathComponent("state.json")
+        let lockURL = directory.appendingPathComponent("session.lock")
+        let request = CaptureRequest(action: .start, token: "old", app: "app", outputDir: directory.path)
+        let state = CaptureState(token: "old", status: .starting, requestedApp: "app", outputDir: directory.path, outputPath: "output", metadataPath: "metadata")
+        try writeJSON(state, to: stateURL)
+
+        do {
+            try await CaptureAgent.withReservedSession(request, stateURL: stateURL, lockURL: lockURL) {
+                XCTAssertThrowsError(try CaptureLock(url: lockURL))
+                throw CaptureCoreError.message("startup failed")
+            }
+            XCTFail("Expected startup failure")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "startup failed")
+        }
+        let failed = try readJSON(CaptureState.self, from: stateURL)
+        XCTAssertEqual(failed.status, .failed)
+        XCTAssertEqual(failed.error, "startup failed")
+        let nextLock = try CaptureLock(url: lockURL)
+        let next = CaptureState(token: "new", status: .starting, requestedApp: "app", outputDir: directory.path, outputPath: "output", metadataPath: "metadata")
+        try writeJSON(next, to: stateURL)
+        nextLock.release()
+
+        do {
+            try await CaptureAgent.withReservedSession(request, stateURL: stateURL, lockURL: lockURL) {
+                XCTFail("A stale request must not start")
+            }
+            XCTFail("Expected stale reservation to fail")
+        } catch {}
+        let current = try readJSON(CaptureState.self, from: stateURL)
+        XCTAssertEqual(current.token, "new")
+        XCTAssertEqual(current.status, .starting)
     }
 }

@@ -142,11 +142,49 @@ public enum CaptureCoreError: LocalizedError {
     }
 }
 
+public struct CaptureLockBusy: LocalizedError {
+    public var errorDescription: String? { "A capture or capture command is already active. Wait for it to finish." }
+}
+
+// Keep the lock file in place: unlinking it lets another process lock a
+// different inode. The kernel releases the lock if its owner exits or crashes.
+public final class CaptureLock {
+    private var descriptor: Int32
+
+    public init(url: URL) throws {
+        descriptor = Darwin.open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else {
+            throw CaptureCoreError.message("Could not open capture lock: \(String(cString: strerror(errno)))")
+        }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let code = errno
+            Darwin.close(descriptor)
+            descriptor = -1
+            if code == EWOULDBLOCK {
+                throw CaptureLockBusy()
+            }
+            throw CaptureCoreError.message("Could not lock capture: \(String(cString: strerror(code)))")
+        }
+    }
+
+    public func release() {
+        guard descriptor >= 0 else { return }
+        _ = flock(descriptor, LOCK_UN)
+        Darwin.close(descriptor)
+        descriptor = -1
+    }
+
+    deinit { release() }
+}
+
 public enum CapturePaths {
     public static var controlDir: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".local/share/capture-native", isDirectory: true)
     }
+
+    public static var commandLock: URL { controlDir.appendingPathComponent("command.lock") }
+    public static var sessionLock: URL { controlDir.appendingPathComponent("session.lock") }
 
     public static var state: URL { controlDir.appendingPathComponent("state.json") }
     public static var stop: URL { controlDir.appendingPathComponent("stop") }
@@ -280,6 +318,29 @@ private extension CGRect {
 public func processExists(_ pid: Int32?) -> Bool {
     guard let pid, pid > 0 else { return false }
     return Darwin.kill(pid, 0) == 0 || errno == EPERM
+}
+
+// Call with the command lock held. An agent may own the session lock before
+// it replaces the starter PID, so only declare the session abandoned when
+// that lock is available and the state is still stale after acquiring it.
+public func markAbandonedCapture(stateURL: URL, lockURL: URL, message: String, processIsRunning: (Int32?) -> Bool = processExists) throws -> CaptureState? {
+    guard var state = try? readJSON(CaptureState.self, from: stateURL) else { return nil }
+    guard state.status.isActive, !processIsRunning(state.pid) else { return state }
+    let lock: CaptureLock
+    do {
+        lock = try CaptureLock(url: lockURL)
+    } catch is CaptureLockBusy {
+        return state
+    }
+    defer { lock.release() }
+    guard let current = try? readJSON(CaptureState.self, from: stateURL) else { return nil }
+    state = current
+    if state.status.isActive && !processIsRunning(state.pid) {
+        state.status = .failed
+        state.error = message
+        try writeJSON(state, to: stateURL)
+    }
+    return state
 }
 
 public func waitForProcessExit(

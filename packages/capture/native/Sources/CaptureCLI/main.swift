@@ -59,6 +59,10 @@ struct CaptureCLI {
         }
 
         try CapturePaths.ensureControlDir()
+        let commandLock = try CaptureLock(url: CapturePaths.commandLock)
+        defer { commandLock.release() }
+        let reservation = try CaptureLock(url: CapturePaths.sessionLock)
+        defer { reservation.release() }
         if var oldState = try? readJSON(CaptureState.self, from: CapturePaths.state), oldState.status.isActive {
             if processExists(oldState.pid) {
                 throw CaptureCoreError.message("A capture is already active for \(oldState.appName ?? oldState.requestedApp).")
@@ -92,30 +96,34 @@ struct CaptureCLI {
         let requestURL = CapturePaths.request(token: token)
         let request = CaptureRequest(action: .start, token: token, app: app, outputDir: outputDir.path, width: width, height: height, liveWorkerPath: liveWorkerPath, liveEventsPath: liveEventsPath)
         var state = CaptureState(token: token, status: .starting, requestedApp: app, outputDir: outputDir.path, outputPath: outputPath.path, metadataPath: metadataPath.path)
+        // Status checks must not mistake the agent launch window for a dead session.
+        state.pid = getpid()
         state.liveEventsPath = liveEventsPath
         state.liveStatus = liveEventsPath == nil ? nil : .starting
 
         try? FileManager.default.removeItem(at: CapturePaths.stop)
         try writeJSON(request, to: requestURL)
         try writeJSON(state, to: CapturePaths.state)
+        reservation.release() // The agent takes over this lock; commandLock guards the handoff.
         try launchAgent(requestPath: requestURL)
 
-        let result = try waitForState(token: token, timeout: liveWorkerPath == nil ? 60 : 240) { $0.status == .recording || $0.status == .failed }
-        if result.status == .failed {
-            throw CaptureCoreError.message(result.error ?? "Capture failed to start.")
-        }
+        let result = try waitForStart(token: token, starterPID: getpid(), commandLock: commandLock, timeout: liveWorkerPath == nil ? 60 : 240)
         printState(result, json: json)
     }
 
     static func stop(json: Bool) throws {
-        guard var state = try? readJSON(CaptureState.self, from: CapturePaths.state), state.status.isActive else {
+        try CapturePaths.ensureControlDir()
+        let commandLock = try CaptureLock(url: CapturePaths.commandLock)
+        defer { commandLock.release() }
+        guard let initial = try? readJSON(CaptureState.self, from: CapturePaths.state), initial.status.isActive else {
             throw CaptureCoreError.message("No capture is currently active.")
         }
-        guard processExists(state.pid) else {
-            state.status = .failed
-            state.error = "Capture agent is no longer running."
-            try writeJSON(state, to: CapturePaths.state)
-            throw CaptureCoreError.message(state.error!)
+        let state = try markAbandonedCapture(stateURL: CapturePaths.state, lockURL: CapturePaths.sessionLock, message: "Capture agent is no longer running.")
+        guard let state, state.status.isActive else {
+            if let state, state.token == initial.token, state.status == .failed {
+                throw CaptureCoreError.message(state.error ?? "Capture failed.")
+            }
+            throw CaptureCoreError.message("No capture is currently active.")
         }
 
         try Data(state.token.utf8).write(to: CapturePaths.stop, options: [.atomic])
@@ -130,14 +138,18 @@ struct CaptureCLI {
     }
 
     static func status(json: Bool) throws {
-        guard var state = try? readJSON(CaptureState.self, from: CapturePaths.state) else {
+        try CapturePaths.ensureControlDir()
+        let commandLock = try? CaptureLock(url: CapturePaths.commandLock)
+        defer { commandLock?.release() }
+        let state: CaptureState?
+        if commandLock != nil {
+            state = try markAbandonedCapture(stateURL: CapturePaths.state, lockURL: CapturePaths.sessionLock, message: "Capture agent exited without finalizing the recording.")
+        } else {
+            state = try? readJSON(CaptureState.self, from: CapturePaths.state)
+        }
+        guard let state else {
             if json { printJSON(["active": false]) } else { print("Capture inactive.") }
             return
-        }
-        if state.status.isActive && !processExists(state.pid) {
-            state.status = .failed
-            state.error = "Capture agent exited without finalizing the recording."
-            try writeJSON(state, to: CapturePaths.state)
         }
         printState(state, json: json)
     }
@@ -190,13 +202,32 @@ struct CaptureCLI {
         }
     }
 
-    static func waitForState(token: String, timeout: TimeInterval, predicate: (CaptureState) -> Bool) throws -> CaptureState {
+    static func waitForStart(token: String, starterPID: Int32, commandLock: CaptureLock, timeout: TimeInterval, pollInterval: TimeInterval = 0.1, readState: () -> CaptureState? = { try? readJSON(CaptureState.self, from: CapturePaths.state) }) throws -> CaptureState {
+        let result = try waitForState(token: token, timeout: timeout, pollInterval: pollInterval, readState: readState) { state in
+            // Once the agent publishes its PID, it owns the session lock and
+            // stop can safely queue a request while startup continues.
+            if let pid = state.pid, pid != starterPID { commandLock.release() }
+            return state.status == .recording || state.status == .failed || state.status == .stopped
+        }
+        if result.status == .failed {
+            throw CaptureCoreError.message(result.error ?? "Capture failed to start.")
+        }
+        if result.status == .stopped {
+            throw CaptureCoreError.message("Capture was stopped before startup completed.")
+        }
+        return result
+    }
+
+    static func waitForState(token: String, timeout: TimeInterval, pollInterval: TimeInterval = 0.1, readState: () -> CaptureState? = { try? readJSON(CaptureState.self, from: CapturePaths.state) }, predicate: (CaptureState) -> Bool) throws -> CaptureState {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if let state = try? readJSON(CaptureState.self, from: CapturePaths.state), state.token == token, predicate(state) {
-                return state
+            if let state = readState() {
+                guard state.token == token else {
+                    throw CaptureCoreError.message("Capture session was replaced while waiting for the agent.")
+                }
+                if predicate(state) { return state }
             }
-            Thread.sleep(forTimeInterval: 0.1)
+            Thread.sleep(forTimeInterval: pollInterval)
         }
         throw CaptureCoreError.message("Timed out waiting for the capture agent.")
     }
