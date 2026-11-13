@@ -118,14 +118,15 @@ struct CaptureCLI {
         try CapturePaths.ensureControlDir()
         let commandLock = try CaptureLock(url: CapturePaths.commandLock)
         defer { commandLock.release() }
-        guard var state = try? readJSON(CaptureState.self, from: CapturePaths.state), state.status.isActive else {
+        guard let initial = try? readJSON(CaptureState.self, from: CapturePaths.state), initial.status.isActive else {
             throw CaptureCoreError.message("No capture is currently active.")
         }
-        guard processExists(state.pid) else {
-            state.status = .failed
-            state.error = "Capture agent is no longer running."
-            try writeJSON(state, to: CapturePaths.state)
-            throw CaptureCoreError.message(state.error!)
+        let state = try markAbandonedCapture(stateURL: CapturePaths.state, lockURL: CapturePaths.sessionLock, message: "Capture agent is no longer running.")
+        guard let state, state.status.isActive else {
+            if let state, state.token == initial.token, state.status == .failed {
+                throw CaptureCoreError.message(state.error ?? "Capture failed.")
+            }
+            throw CaptureCoreError.message("No capture is currently active.")
         }
 
         try Data(state.token.utf8).write(to: CapturePaths.stop, options: [.atomic])
@@ -143,14 +144,15 @@ struct CaptureCLI {
         try CapturePaths.ensureControlDir()
         let commandLock = try? CaptureLock(url: CapturePaths.commandLock)
         defer { commandLock?.release() }
-        guard var state = try? readJSON(CaptureState.self, from: CapturePaths.state) else {
+        let state: CaptureState?
+        if commandLock != nil {
+            state = try markAbandonedCapture(stateURL: CapturePaths.state, lockURL: CapturePaths.sessionLock, message: "Capture agent exited without finalizing the recording.")
+        } else {
+            state = try? readJSON(CaptureState.self, from: CapturePaths.state)
+        }
+        guard let state else {
             if json { printJSON(["active": false]) } else { print("Capture inactive.") }
             return
-        }
-        if commandLock != nil && state.status.isActive && !processExists(state.pid) {
-            state.status = .failed
-            state.error = "Capture agent exited without finalizing the recording."
-            try writeJSON(state, to: CapturePaths.state)
         }
         printState(state, json: json)
     }

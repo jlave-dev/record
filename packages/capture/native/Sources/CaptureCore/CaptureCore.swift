@@ -142,6 +142,10 @@ public enum CaptureCoreError: LocalizedError {
     }
 }
 
+public struct CaptureLockBusy: LocalizedError {
+    public var errorDescription: String? { "A capture or capture command is already active. Wait for it to finish." }
+}
+
 // Keep the lock file in place: unlinking it lets another process lock a
 // different inode. The kernel releases the lock if its owner exits or crashes.
 public final class CaptureLock {
@@ -157,7 +161,7 @@ public final class CaptureLock {
             Darwin.close(descriptor)
             descriptor = -1
             if code == EWOULDBLOCK {
-                throw CaptureCoreError.message("A capture or capture command is already active. Wait for it to finish.")
+                throw CaptureLockBusy()
             }
             throw CaptureCoreError.message("Could not lock capture: \(String(cString: strerror(code)))")
         }
@@ -314,6 +318,29 @@ private extension CGRect {
 public func processExists(_ pid: Int32?) -> Bool {
     guard let pid, pid > 0 else { return false }
     return Darwin.kill(pid, 0) == 0 || errno == EPERM
+}
+
+// Call with the command lock held. An agent may own the session lock before
+// it replaces the starter PID, so only declare the session abandoned when
+// that lock is available and the state is still stale after acquiring it.
+public func markAbandonedCapture(stateURL: URL, lockURL: URL, message: String, processIsRunning: (Int32?) -> Bool = processExists) throws -> CaptureState? {
+    guard var state = try? readJSON(CaptureState.self, from: stateURL) else { return nil }
+    guard state.status.isActive, !processIsRunning(state.pid) else { return state }
+    let lock: CaptureLock
+    do {
+        lock = try CaptureLock(url: lockURL)
+    } catch is CaptureLockBusy {
+        return state
+    }
+    defer { lock.release() }
+    guard let current = try? readJSON(CaptureState.self, from: stateURL) else { return nil }
+    state = current
+    if state.status.isActive && !processIsRunning(state.pid) {
+        state.status = .failed
+        state.error = message
+        try writeJSON(state, to: stateURL)
+    }
+    return state
 }
 
 public func waitForProcessExit(

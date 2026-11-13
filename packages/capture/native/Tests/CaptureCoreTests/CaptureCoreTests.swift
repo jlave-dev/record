@@ -89,3 +89,47 @@ final class CaptureLockTests: XCTestCase {
         retry.release()
     }
 }
+
+final class CaptureHandoffTests: XCTestCase {
+    func testDeadStarterIsNotMarkedFailedWhileAgentOwnsSession() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let stateURL = directory.appendingPathComponent("state.json")
+        let lockURL = directory.appendingPathComponent("session.lock")
+        var state = CaptureState(token: "token", status: .starting, requestedApp: "app", outputDir: directory.path, outputPath: "output", metadataPath: "metadata")
+        state.pid = 123
+        try writeJSON(state, to: stateURL)
+        let agent = try CaptureLock(url: lockURL)
+        let duringHandoff = try markAbandonedCapture(stateURL: stateURL, lockURL: lockURL, message: "abandoned") { _ in false }
+        XCTAssertEqual(duringHandoff?.status, .starting)
+        XCTAssertEqual(try readJSON(CaptureState.self, from: stateURL).status, .starting)
+        agent.release()
+        let abandoned = try markAbandonedCapture(stateURL: stateURL, lockURL: lockURL, message: "abandoned") { _ in false }
+        XCTAssertEqual(abandoned?.status, .failed)
+        XCTAssertEqual(abandoned?.error, "abandoned")
+    }
+
+    func testRechecksStateAfterAcquiringSessionLock() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let stateURL = directory.appendingPathComponent("state.json")
+        let lockURL = directory.appendingPathComponent("session.lock")
+        var state = CaptureState(token: "token", status: .starting, requestedApp: "app", outputDir: directory.path, outputPath: "output", metadataPath: "metadata")
+        state.pid = 123
+        try writeJSON(state, to: stateURL)
+        let result = try markAbandonedCapture(stateURL: stateURL, lockURL: lockURL, message: "abandoned") { pid in
+            if pid == 123 {
+                state.pid = 456
+                try! writeJSON(state, to: stateURL)
+                return false
+            }
+            return pid == 456
+        }
+        XCTAssertEqual(result?.status, .starting)
+        XCTAssertEqual(result?.pid, 456)
+        XCTAssertEqual(try readJSON(CaptureState.self, from: stateURL).status, .starting)
+    }
+
+}
