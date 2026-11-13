@@ -18,10 +18,6 @@ class Record < Formula
     prefix.install Dir["*"]
   end
 
-  def post_install
-    system bin/"record", "plugin", "refresh"
-  end
-
   def caveats
     <<~EOS
       First live use requests Screen & System Audio Recording permission and
@@ -32,7 +28,9 @@ class Record < Formula
         record plugin install --codex
         record plugin install --claude
 
-      Installed adapters refresh automatically during future Homebrew upgrades.
+      After upgrades, installed adapters refresh on the first runtime command.
+      To refresh before starting an agent session, run:
+        record plugin refresh
       Restart the agent app to load the new plugin version.
     EOS
   end
@@ -40,5 +38,8 @@ class Record < Formula
   test do
     assert_equal version.to_s, shell_output("#{bin}/record --version").strip
     assert_match "record plugin <install", shell_output("#{bin}/record --help")
+    system libexec/"record/capture/capture", "--help"
+    system libexec/"record/transcribe", "--help"
+    system libexec/"record/live/live", "--help"
   end
 end

@@ -16,7 +16,7 @@ record plugin install --codex
 record plugin install --claude
 ```
 
-Use `record plugin install` without a flag when both agent CLIs are installed. Homebrew upgrades refresh installed plugins automatically; restart the agent app to load the new version. The first runtime command also retries any refresh that could not run during the upgrade.
+Use `record plugin install` without a flag when both agent CLIs are installed. After a Homebrew upgrade, the first runtime command refreshes installed plugins automatically. Run `record plugin refresh` to refresh before starting an agent session, then restart the agent app. Failed installs stay pending and retry on later runtime commands, even if the partial install removed the plugin. Automatic refresh failures warn without blocking the runtime; explicit refresh failures return a nonzero exit code. Homebrew does not modify per-user agent settings.
 
 ## Skill Surface
 
@@ -39,7 +39,7 @@ plugins/record/scripts/smoke-test.sh
 plugins/record/scripts/test-live-adapters.sh
 ```
 
-The smoke test validates both plugin formats, skills, helper executability, missing-binary failures, missing input handling, conflicting source flags, and the shared live cursor/grounding/privacy contract. The CLI test covers default and selective installs, automatic refresh, migration, and manual uninstall handling.
+The smoke test validates both plugin formats, skills, helper executability, missing-binary failures, runtime failure exit codes and successful retries, missing input handling, conflicting source flags, and the shared live cursor/grounding/privacy contract. The CLI test covers default and selective installs, automatic refresh, migration, manual uninstall handling, failed install retries, partial host success, and marketplace staging failures.
 
 ## Privacy
 

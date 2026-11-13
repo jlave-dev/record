@@ -102,6 +102,28 @@ expect_failure_contains \
   "Conflicting source flags" \
   env PATH="$safe_path" /bin/bash "$script_dir/run-transcribe.sh" --input "$tmp_input" --output "$tmp_dir/out" --copy-source --move-source
 
+cat > "$tmp_dir/record" <<'SH'
+#!/usr/bin/env bash
+printf 'runtime output\n'
+exit "${MOCK_RUNTIME_EXIT:-0}"
+SH
+chmod +x "$tmp_dir/record"
+for command_name in start stop status doctor setup apps; do
+  args=("$command_name")
+  [[ "$command_name" != start ]] || args+=(--app zoom)
+  expect_failure_contains "capture $command_name runtime failure" 42 "Next:" \
+    env PATH="$tmp_dir:$safe_path" MOCK_RUNTIME_EXIT=42 \
+    /bin/bash "$script_dir/run-capture.sh" "${args[@]}"
+  env PATH="$tmp_dir:$safe_path" /bin/bash "$script_dir/run-capture.sh" "${args[@]}" >"$tmp_dir/success.out" 2>&1
+  [[ "$(<"$tmp_dir/success.out")" == 'runtime output' ]] || fail "capture retry changed output"
+done
+expect_failure_contains "transcribe runtime failure" 42 "Next:" \
+  env PATH="$tmp_dir:$safe_path" MOCK_RUNTIME_EXIT=42 \
+  /bin/bash "$script_dir/run-transcribe.sh" --input "$tmp_input" --output "$tmp_dir/out"
+env PATH="$tmp_dir:$safe_path" /bin/bash "$script_dir/run-transcribe.sh" \
+  --input "$tmp_input" --output "$tmp_dir/out" >"$tmp_dir/success.out" 2>&1
+[[ "$(<"$tmp_dir/success.out")" == 'runtime output' ]] || fail "transcribe retry changed output"
+
 run "$script_dir/test-live-adapters.sh"
 
 echo "Plugin smoke test passed: $plugin_root"

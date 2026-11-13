@@ -66,9 +66,9 @@ write_plugin_state() {
   local value="$2"
   local marker="$plugin_state_dir/$name"
   local temporary_marker="${marker}.tmp-$$"
-  mkdir -p "$plugin_state_dir"
-  printf '%s\n' "$value" > "$temporary_marker"
-  mv "$temporary_marker" "$marker"
+  mkdir -p "$plugin_state_dir" || return
+  printf '%s\n' "$value" > "$temporary_marker" || return
+  mv "$temporary_marker" "$marker" || return
 }
 
 plugin_is_installed() {
@@ -85,27 +85,29 @@ plugin_is_installed() {
 install_codex_plugin() {
   local plugin_marketplace="$1"
   local installed_plugins
-  codex plugin marketplace add "$plugin_marketplace" --json
-  installed_plugins="$(codex plugin list --json 2>/dev/null)"
+  write_plugin_state codex.version pending || return
+  codex plugin marketplace add "$plugin_marketplace" --json || return
+  installed_plugins="$(codex plugin list --json 2>/dev/null)" || return
   if grep -Eq '"pluginId"[[:space:]]*:[[:space:]]*"record@record"' <<<"$installed_plugins"; then
-    codex plugin remove record@record --json
+    codex plugin remove record@record --json || return
     codex plugin marketplace remove record --json || echo "Warning: old record marketplace could not be removed." >&2
   fi
-  codex plugin add record@record-cli --json
-  write_plugin_state codex.version "$version"
+  codex plugin add record@record-cli --json || return
+  write_plugin_state codex.version "$version" || return
   echo "Record plugin installed for Codex. Start a new Codex task before using it."
 }
 
 install_claude_plugin() {
   local plugin_marketplace="$1"
   local installed_marketplaces
-  installed_marketplaces="$(claude plugin marketplace list --json 2>/dev/null)"
+  write_plugin_state claude.version pending || return
+  installed_marketplaces="$(claude plugin marketplace list --json 2>/dev/null)" || return
   if grep -Eq '"name"[[:space:]]*:[[:space:]]*"record-cli"' <<<"$installed_marketplaces"; then
-    claude plugin marketplace remove record-cli --scope user
+    claude plugin marketplace remove record-cli --scope user || return
   fi
-  claude plugin marketplace add "$plugin_marketplace" --scope user
-  claude plugin install record@record-cli --scope user
-  write_plugin_state claude.version "$version"
+  claude plugin marketplace add "$plugin_marketplace" --scope user || return
+  claude plugin install record@record-cli --scope user || return
+  write_plugin_state claude.version "$version" || return
   echo "Record plugin installed for Claude Code. Start a new session before using it."
 }
 
@@ -138,20 +140,43 @@ install_plugin() {
     }
   fi
 
-  rm -rf "$staging_marketplace"
-  mkdir -p "$(dirname -- "$plugin_marketplace")"
-  ditto "$marketplace_dir" "$staging_marketplace"
-  rm -rf "$plugin_marketplace"
-  mv "$staging_marketplace" "$plugin_marketplace"
+  local backup_marketplace="${plugin_marketplace}.backup-$$"
+  local exit_code=0
+  [[ ! -e "$backup_marketplace" ]] || {
+    echo "Previous marketplace backup still exists at $backup_marketplace." >&2
+    return 1
+  }
+  rm -rf "$staging_marketplace" || return
+  mkdir -p "$(dirname -- "$plugin_marketplace")" || return
+  ditto "$marketplace_dir" "$staging_marketplace" || return
+  if [[ -e "$plugin_marketplace" ]]; then
+    mv "$plugin_marketplace" "$backup_marketplace" || return
+  fi
+  if mv "$staging_marketplace" "$plugin_marketplace"; then
+    rm -rf "$backup_marketplace" || return
+  else
+    exit_code=$?
+    if [[ -e "$backup_marketplace" ]]; then
+      mv "$backup_marketplace" "$plugin_marketplace" || echo "Warning: previous marketplace remains at $backup_marketplace." >&2
+    fi
+    return "$exit_code"
+  fi
 
-  [[ "$install_codex" -eq 0 ]] || install_codex_plugin "$plugin_marketplace"
-  [[ "$install_claude" -eq 0 ]] || install_claude_plugin "$plugin_marketplace"
+  # These functions also run inside conditionals, where Bash disables errexit.
+  # Every required operation must propagate its failure explicitly.
+  if [[ "$install_codex" -eq 1 ]]; then
+    install_codex_plugin "$plugin_marketplace" || exit_code=1
+  fi
+  if [[ "$install_claude" -eq 1 ]]; then
+    install_claude_plugin "$plugin_marketplace" || exit_code=1
+  fi
+  return "$exit_code"
 }
 
 refresh_installed_plugins() {
-  local refresh_codex=0
-  local refresh_claude=0
-  local host marker scan_marker installed_version install_check target
+  local host marker scan_marker installed_version install_check
+  local exit_code=0
+  local refreshed=0
 
   for host in codex claude; do
     marker="$plugin_state_dir/$host.version"
@@ -163,31 +188,36 @@ refresh_installed_plugins() {
       continue
     fi
 
-    if plugin_is_installed "$host"; then
-      write_plugin_state "$host.version" pending
-      [[ "$host" == codex ]] && refresh_codex=1 || refresh_claude=1
-    else
-      install_check=$?
-      if [[ "$install_check" -eq 1 ]]; then
-        rm -f "$marker"
-        write_plugin_state "$host.scan" "$version"
+    # A partial install may remove the plugin from the host's listing.
+    # Keep retrying pending work instead of treating it as a manual uninstall.
+    if [[ "$installed_version" != pending ]]; then
+      if plugin_is_installed "$host"; then
+        :
+      else
+        install_check=$?
+        if [[ "$install_check" -eq 1 ]]; then
+          rm -f "$marker" || { exit_code=1; continue; }
+          write_plugin_state "$host.scan" "$version" || exit_code=1
+        elif [[ -n "$installed_version" ]] || command -v "$host" >/dev/null 2>&1; then
+          exit_code=1
+        fi
+        continue
       fi
+    fi
+
+    if install_plugin "--$host" >/dev/null; then
+      refreshed=1
+    else
+      exit_code=1
     fi
   done
 
-  [[ "$refresh_codex" -eq 1 || "$refresh_claude" -eq 1 ]] || return 0
-  if [[ "$refresh_codex" -eq 1 && "$refresh_claude" -eq 1 ]]; then
-    target=all
-  elif [[ "$refresh_codex" -eq 1 ]]; then
-    target=--codex
-  else
-    target=--claude
-  fi
-  if install_plugin "$target" >/dev/null; then
+  if [[ "$exit_code" -ne 0 ]]; then
+    echo "Warning: Record could not refresh installed agent plugins. Run \`record plugin refresh\` to retry." >&2
+  elif [[ "$refreshed" -eq 1 ]]; then
     echo "Record plugins refreshed for version $version." >&2
-  else
-    echo "Warning: Record could not refresh installed agent plugins. Run \`record plugin install\` to retry." >&2
   fi
+  return "$exit_code"
 }
 
 command_name="${1:-help}"
@@ -195,28 +225,28 @@ command_name="${1:-help}"
 
 case "$command_name" in
   capture)
-    refresh_installed_plugins
+    refresh_installed_plugins || true
     require_executable "$runtime_dir/capture/capture" "capture"
     exec "$runtime_dir/capture/capture" "$@"
     ;;
   transcribe)
-    refresh_installed_plugins
+    refresh_installed_plugins || true
     require_executable "$runtime_dir/transcribe" "transcribe"
     exec "$runtime_dir/transcribe" "$@"
     ;;
   live)
-    refresh_installed_plugins
+    refresh_installed_plugins || true
     require_executable "$runtime_dir/live/live" "live"
     exec "$runtime_dir/live/live" "$@"
     ;;
   doctor)
     [[ $# -eq 0 ]] || { echo "record doctor does not accept arguments; use record capture doctor --json or record transcribe doctor --json." >&2; exit 2; }
-    refresh_installed_plugins
+    refresh_installed_plugins || true
     run_doctor
     ;;
   setup)
     [[ $# -eq 0 ]] || { echo "record setup does not accept arguments; use the product-specific setup command for advanced options." >&2; exit 2; }
-    refresh_installed_plugins
+    refresh_installed_plugins || true
     run_setup
     ;;
   plugin)
