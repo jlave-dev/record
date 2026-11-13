@@ -232,4 +232,3 @@ private struct DoctorPayload: Encodable {
     let ok: Bool
     let checks: [Check]
 }
-
