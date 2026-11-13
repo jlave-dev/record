@@ -39,7 +39,20 @@ async function replace(relativePath, pattern, replacement) {
 async function checkVersion(expectedVersion) {
   const workflow = await readFile(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
   const releaseConfig = await readFile(path.join(repoRoot, ".releaserc.json"), "utf8");
-  assert.match(workflow, /conventional-changelog-conventionalcommits@9\.3\.1/);
+  assert.match(workflow, /run: npm run release/);
+  const manifest = await readJson("package.json");
+  const locked = await readJson("package-lock.json");
+  const releasePackages = [
+    "semantic-release",
+    "conventional-changelog-conventionalcommits",
+    ...JSON.parse(releaseConfig).plugins.map(([name]) => name),
+  ];
+  for (const name of releasePackages) {
+    const version = manifest.devDependencies[name];
+    assertVersion(version);
+    assert.equal(locked.packages[""].devDependencies[name], version, `${name} root lock differs`);
+    assert.equal(locked.packages[`node_modules/${name}`].version, version, `${name} resolution differs`);
+  }
   assert.doesNotMatch(releaseConfig, /"@semantic-release\/git"/);
 
   const checks = [];
