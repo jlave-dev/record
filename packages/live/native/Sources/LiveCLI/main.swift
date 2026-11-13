@@ -1,5 +1,6 @@
 import Foundation
 import LiveCore
+import Darwin
 
 @main
 struct LiveCLI {
@@ -76,8 +77,9 @@ struct LiveCLI {
         var events: [TranscriptEvent] = []
         var terminal = false
         while true {
+            let stateTerminal = state.liveEventsPath != eventsPath || state.isTerminal
             events = try EventLogReader.read(url: eventsURL, after: after)
-            terminal = state.liveEventsPath != eventsPath || state.isTerminal || events.contains {
+            terminal = stateTerminal || events.contains {
                 $0.type == "live.stopped" || $0.type == "live.failed"
             }
             if !events.isEmpty || terminal || ContinuousClock.now >= deadline { break }
@@ -219,9 +221,13 @@ private struct CaptureStatePayload: Decodable {
     let liveEventsPath: String?
     let liveStatus: String?
     let status: String?
+    let liveWorkerPID: Int32?
 
     var isTerminal: Bool {
-        liveStatus == "stopped" || liveStatus == "failed" || status == "stopped" || status == "failed"
+        if liveStatus == "stopped" || status == "stopped" || status == "failed" { return true }
+        // A forwarding failure can precede the worker flushing its buffered speech.
+        guard liveStatus == "failed", let pid = liveWorkerPID, pid > 0 else { return false }
+        return Darwin.kill(pid, 0) != 0 && errno == ESRCH
     }
 }
 

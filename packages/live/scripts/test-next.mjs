@@ -6,13 +6,14 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
 const cli = resolve(import.meta.dirname, '../native/.build/debug/live');
-function fixture(t, states, events = '') {
+function fixture(t, states, events = '', appendOnSecondPoll = '') {
   const root = mkdtempSync(join(tmpdir(), 'live-next-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const log = join(root, 'events.jsonl');
   const capture = join(root, 'capture');
   writeFileSync(log, events);
   writeFileSync(join(root, 'states.json'), JSON.stringify(states.map(state => ({ liveEventsPath: log, ...state }))));
+  writeFileSync(join(root, 'append'), appendOnSecondPoll);
   writeFileSync(capture, `#!${process.execPath}\n` + String.raw`
 const fs = require('node:fs');
 const path = require('node:path');
@@ -20,6 +21,7 @@ const root = __dirname;
 const countPath = path.join(root, 'count');
 const count = fs.existsSync(countPath) ? Number(fs.readFileSync(countPath, 'utf8')) : 0;
 const states = JSON.parse(fs.readFileSync(path.join(root, 'states.json'), 'utf8'));
+if (count === 1) fs.appendFileSync(path.join(root, 'events.jsonl'), fs.readFileSync(path.join(root, 'append')));
 fs.writeFileSync(countPath, String(count + 1));
 console.log(JSON.stringify(states[Math.min(count, states.length - 1)]));
 `);
@@ -37,7 +39,7 @@ console.log(JSON.stringify(states[Math.min(count, states.length - 1)]));
   };
 }
 
-for (const state of [{ liveStatus: 'stopped' }, { liveStatus: 'failed' }, { status: 'failed', liveStatus: 'running' }]) {
+for (const state of [{ liveStatus: 'stopped' }, { status: 'failed', liveStatus: 'running' }]) {
   test(`terminal state returns immediately: ${JSON.stringify(state)}`, t => {
     const f = fixture(t, [state]);
     const result = f.run('7');
@@ -46,6 +48,41 @@ for (const state of [{ liveStatus: 'stopped' }, { liveStatus: 'failed' }, { stat
     assert.equal(f.calls(), 1);
   });
 }
+
+test('waits for a failed forwarder’s live worker to flush its tail', t => {
+  const tail = ['transcript.final', 'live.stopped'].map((type, index) => JSON.stringify({
+    schema_version: 1, cursor: index + 1, type, source_audio_ms: 0,
+    wall_elapsed_ms: 0, delivery_latency_ms: 0, created_at: 'fixture', text: 'tail',
+  }) + '\n').join('');
+  const f = fixture(t, [
+    { status: 'recording', liveStatus: 'failed', liveWorkerPID: process.pid },
+    { status: 'stopped', liveStatus: 'failed', liveWorkerPID: process.pid },
+  ], '', tail);
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.deepEqual(payload.events.map(event => event.type), ['transcript.final', 'live.stopped']);
+  assert.equal(payload.next_cursor, 2);
+  assert.equal(payload.terminal, true);
+  assert.equal(f.calls(), 2);
+});
+
+test('failed worker confirmed exited is terminal', t => {
+  const exited = spawnSync(process.execPath, ['-e', '']);
+  assert.equal(exited.status, 0);
+  const f = fixture(t, [{ status: 'recording', liveStatus: 'failed', liveWorkerPID: exited.pid }]);
+  const result = f.run('7');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { events: [], next_cursor: 7, terminal: true });
+  assert.equal(f.calls(), 1);
+});
+
+test('failed worker with unknown PID does not imply its log is closed', t => {
+  const f = fixture(t, [{ status: 'recording', liveStatus: 'failed' }]);
+  const result = f.run('7', '0');
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { events: [], next_cursor: 7, terminal: false });
+});
 
 test('refreshes state during a wait and exits when capture becomes terminal', t => {
   const f = fixture(t, [{ liveStatus: 'running' }, { liveStatus: 'stopped' }]);
