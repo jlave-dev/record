@@ -5,20 +5,29 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
-actor RecordingEvents {
-    enum Status {
+final class RecordingEvents: @unchecked Sendable {
+    enum Status: Equatable {
         case waiting
         case started
         case finished
         case failed(String)
     }
 
+    private let lock = NSLock()
     private var status: Status = .waiting
 
-    func markStarted() { status = .started }
-    func markFinished() { status = .finished }
-    func markFailed(_ message: String) { status = .failed(message) }
-    func snapshot() -> Status { status }
+    func markStarted() { lock.withLock { if status == .waiting { status = .started } } }
+    func markFinished() { lock.withLock { if case .failed = status { return }; status = .finished } }
+    func markFailed(_ message: String) { lock.withLock { if case .failed = status { return }; status = .failed(message) } }
+    func snapshot() -> Status { lock.withLock { status } }
+
+    func checkRecording(_ label: String) throws {
+        switch snapshot() {
+        case .failed(let message): throw CaptureCoreError.message("\(label): \(message)")
+        case .finished: throw CaptureCoreError.message("\(label) ended before capture was stopped. The recording is incomplete.")
+        default: break
+        }
+    }
 }
 
 final class CaptureDelegate: NSObject, SCRecordingOutputDelegate, SCStreamDelegate {
@@ -29,19 +38,19 @@ final class CaptureDelegate: NSObject, SCRecordingOutputDelegate, SCStreamDelega
     }
 
     func recordingOutputDidStartRecording(_ recordingOutput: SCRecordingOutput) {
-        Task { await events.markStarted() }
+        events.markStarted()
     }
 
     func recordingOutput(_ recordingOutput: SCRecordingOutput, didFailWithError error: Error) {
-        Task { await events.markFailed(error.localizedDescription) }
+        events.markFailed(error.localizedDescription)
     }
 
     func recordingOutputDidFinishRecording(_ recordingOutput: SCRecordingOutput) {
-        Task { await events.markFinished() }
+        events.markFinished()
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        Task { await events.markFailed(error.localizedDescription) }
+        events.markFailed(error.localizedDescription)
     }
 }
 
@@ -341,12 +350,18 @@ struct CaptureAgent {
         let events = RecordingEvents()
         let delegate = CaptureDelegate(events: events)
         let stream = SCStream(filter: source.filter, configuration: configuration, delegate: delegate)
-        let recordingConfiguration = SCRecordingOutputConfiguration()
-        recordingConfiguration.outputURL = outputURL
-        recordingConfiguration.outputFileType = .mp4
-        recordingConfiguration.videoCodecType = .h264
-        let recordingOutput = SCRecordingOutput(configuration: recordingConfiguration, delegate: delegate)
-        try stream.addRecordingOutput(recordingOutput)
+        var videoWriter: ZoomVideoWriter?
+        if usesSeparateZoomAudio {
+            let writer = try ZoomVideoWriter(url: outputURL, width: dimensions.width, height: dimensions.height, events: events)
+            try stream.addStreamOutput(writer, type: .screen, sampleHandlerQueue: writer.queue)
+            videoWriter = writer
+        } else {
+            let recordingConfiguration = SCRecordingOutputConfiguration()
+            recordingConfiguration.outputURL = outputURL
+            recordingConfiguration.outputFileType = .mp4
+            recordingConfiguration.videoCodecType = .h264
+            try stream.addRecordingOutput(SCRecordingOutput(configuration: recordingConfiguration, delegate: delegate))
+        }
 
         let audioOutputURL = URL(fileURLWithPath: outputDir).appendingPathComponent(".zoom-audio.mp4")
         var audioStream: SCStream?
@@ -412,15 +427,17 @@ struct CaptureAgent {
         var captureStarted = false
         var audioCaptureStarted = false
         do {
+            // A concurrent start may partially succeed. Clean up both streams
+            // on failure instead of leaving the successful one running.
+            captureStarted = true
             if let audioStream {
+                audioCaptureStarted = true
                 async let startVideo: Void = stream.startCapture()
                 async let startAudio: Void = audioStream.startCapture()
                 _ = try await (startVideo, startAudio)
-                audioCaptureStarted = true
             } else {
                 try await stream.startCapture()
             }
-            captureStarted = true
             try await waitForEvent(events, wanted: .started, timeout: 15)
             if let audioEvents { try await waitForEvent(audioEvents, wanted: .started, timeout: 15) }
 
@@ -437,7 +454,9 @@ struct CaptureAgent {
             var nextLiveStateRefresh = Date().addingTimeInterval(1)
             while true {
                 if let stopToken = try? String(contentsOf: CapturePaths.stop, encoding: .utf8), stopToken == request.token { break }
-                if case .failed(let message) = await events.snapshot() { throw CaptureCoreError.message(message) }
+                videoWriter?.checkHealth()
+                try events.checkRecording("Video recording")
+                try audioEvents?.checkRecording("Zoom audio recording")
                 if application.bundleIdentifier == zoomBundleID, Date() >= nextSourceRefresh {
                     nextSourceRefresh = Date().addingTimeInterval(0.5)
                     if let refreshedContent = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
@@ -471,6 +490,11 @@ struct CaptureAgent {
 
             state.status = .stopping
             try writeJSON(state, to: CapturePaths.state)
+            // Check even when stop arrived between polls; an already-finished
+            // output must never turn into a successful, truncated recording.
+            videoWriter?.checkHealth()
+            try events.checkRecording("Video recording")
+            try audioEvents?.checkRecording("Zoom audio recording")
             if let audioStream {
                 async let stopVideo: Void = stream.stopCapture()
                 async let stopAudio: Void = audioStream.stopCapture()
@@ -480,6 +504,7 @@ struct CaptureAgent {
                 try await stream.stopCapture()
             }
             captureStarted = false
+            if let videoWriter { try await videoWriter.finish() }
             try await waitForEvent(events, wanted: .finished, timeout: 15)
             if let audioEvents {
                 try await waitForEvent(audioEvents, wanted: .finished, timeout: 15)
@@ -529,8 +554,10 @@ struct CaptureAgent {
         } catch {
             if captureStarted { try? await stream.stopCapture() }
             if audioCaptureStarted { try? await audioStream?.stopCapture() }
+            if let videoWriter { try? await videoWriter.finish() }
             liveWorker?.cancel()
-            try? FileManager.default.removeItem(at: audioOutputURL)
+            // Keep the independent audio file on failure for recovery. It may
+            // contain meeting audio beyond the last successfully written frame.
             state.status = .failed
             state.error = error.localizedDescription
             state.stoppedAt = nowISO8601()
@@ -598,7 +625,7 @@ struct CaptureAgent {
         )
     }
 
-    private static func replaceAudio(in videoURL: URL, withAudioFrom audioURL: URL) async throws {
+    static func replaceAudio(in videoURL: URL, withAudioFrom audioURL: URL) async throws {
         let videoAsset = AVURLAsset(url: videoURL)
         let audioAsset = AVURLAsset(url: audioURL)
         guard let sourceVideo = try await videoAsset.loadTracks(withMediaType: .video).first,
@@ -645,7 +672,7 @@ struct CaptureAgent {
     static func waitForEvent(_ events: RecordingEvents, wanted: WantedEvent, timeout: TimeInterval) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            switch await events.snapshot() {
+            switch events.snapshot() {
             case .started where wanted == .started: return
             case .finished where wanted == .finished: return
             case .failed(let message): throw CaptureCoreError.message(message)
