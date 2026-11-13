@@ -386,14 +386,15 @@ function prepareSourceAction(inputPath: string, outputDir: string, copySource: b
       try {
         linkSync(inputPath, destination);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+        if (!["EXDEV", "ENOTSUP", "EOPNOTSUPP", "EPERM", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
         copyFileSync(inputPath, destination, constants.COPYFILE_EXCL);
       }
       try {
         rmSync(inputPath);
       } catch (error) {
-        rmSync(destination);
-        throw error;
+        // Keep the copy if removing the original fails. Its pathname may also
+        // have been replaced by another writer, so rollback cannot safely unlink it.
+        fail(`Source was copied to ${destination}, but the original could not be removed: ${String(error)}`);
       }
     }
   };
@@ -551,18 +552,22 @@ async function commandTranscribe(options: { input?: string; output?: string; cop
     };
     writeJson(join(stagingDir, "metadata.json"), metadata);
 
-    // Publish only fresh, validated outputs. Hard links fail on collisions,
-    // including files created by another run after the initial check.
-    const published: string[] = [];
+    // Exclusive copies work on volumes without hard links. Never unlink a
+    // published pathname on failure: another writer may have replaced it.
+    // Metadata is the final artifact and describes only completed source actions.
+    let sourceApplied = false;
     try {
-      for (const path of artifactPaths) {
-        linkSync(join(stagingDir, basename(path)), path);
-        published.push(path);
+      for (const path of [textPath, transcriptJsonPath]) {
+        copyFileSync(join(stagingDir, basename(path)), path, constants.COPYFILE_EXCL);
       }
       sourcePlan.apply();
+      sourceApplied = true;
+      copyFileSync(join(stagingDir, "metadata.json"), metadataPath, constants.COPYFILE_EXCL);
     } catch (error) {
-      for (const path of published) rmSync(path);
-      throw error;
+      const sourceDetails = sourceApplied && sourcePlan.destination
+        ? ` Source action ${sourcePlan.action} completed at ${sourcePlan.destination}.`
+        : "";
+      fail(`Could not complete transcription artifacts: ${String(error)}. Files already published in ${outputDir} were preserved.${sourceDetails}`);
     }
 
     const payload = {
